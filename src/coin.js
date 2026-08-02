@@ -28,25 +28,143 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
   const group = new THREE.Group();
   scene.add(group);
 
-  const coinGeo = new THREE.CylinderGeometry(COIN_R, COIN_R, CT, 24);
+  // --- Procedural textures: every coin, bill and card is drawn on a canvas so
+  // the game looks like a real casino (embossed gold, $ bills, playing cards)
+  // instead of flat-colored boxes. Textures are shared across all meshes.
+  function drawStar(ctx, cx, cy, points, outer, inner) {
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+      const r = i % 2 === 0 ? outer : inner;
+      const a = (i * Math.PI) / points - Math.PI / 2;
+      const x = cx + Math.cos(a) * r;
+      const y = cy + Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function makeCoinTexture(variant) {
+    const S = 128;
+    const c = document.createElement('canvas'); c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    const cx = S / 2, cy = S / 2, R = S / 2 - 2;
+    // Gold gradient + engraved rim + inner ring = embossed casino coin.
+    const palettes = [
+      ['#fff3c0', '#f2c94c', '#b8860b'],
+      ['#fffbe6', '#ffe27a', '#c9951e'],
+      ['#ffe9a3', '#f0b63a', '#a06a12'],
+    ];
+    const [hi, mid, lo] = palettes[variant % palettes.length];
+    const g = ctx.createRadialGradient(cx - 12, cy - 12, R * 0.15, cx, cy, R);
+    g.addColorStop(0, hi); g.addColorStop(0.65, mid); g.addColorStop(1, lo);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(90,60,10,0.9)'; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.arc(cx, cy, R - 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,246,200,0.55)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(cx, cy, R - 9, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.6, 0, Math.PI * 2); ctx.stroke();
+    // Milled reeding ticks around the rim — the classic token edge detail.
+    ctx.strokeStyle = 'rgba(90,60,10,0.45)'; ctx.lineWidth = 2;
+    for (let i = 0; i < 48; i++) {
+      const a = (i / 48) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (R - 2), cy + Math.sin(a) * (R - 2));
+      ctx.lineTo(cx + Math.cos(a) * (R - 8), cy + Math.sin(a) * (R - 8));
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(110,68,0,0.95)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (variant % 3 === 0) {
+      ctx.font = '900 62px Arial'; ctx.fillText('1', cx, cy + 5);
+    } else if (variant % 3 === 1) {
+      drawStar(ctx, cx, cy - 2, 5, R * 0.42, R * 0.19);
+    } else {
+      ctx.font = '900 58px Arial'; ctx.fillText('C', cx, cy + 5);
+    }
+    // soft top-left specular highlight sells the "embossed" look
+    ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(cx - 7, cy - 7, R * 0.78, Math.PI, Math.PI * 1.7); ctx.stroke();
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  function makeBillTexture(variant) {
+    const W = 256, H = 128;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, variant % 2 ? '#3ddc84' : '#2ecf7e');
+    bg.addColorStop(1, variant % 2 ? '#1aa864' : '#0f8f52');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 5;
+    ctx.strokeRect(7, 7, W - 14, H - 14);
+    ctx.strokeStyle = 'rgba(0,80,40,0.8)'; ctx.lineWidth = 2;
+    ctx.strokeRect(13, 13, W - 26, H - 26);
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '900 92px Arial'; ctx.fillText('$', W / 2, H / 2 + 4);
+    ctx.font = '900 26px Arial';
+    ctx.fillText('10', 30, 26);
+    ctx.fillText('10', W - 30, H - 26);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  function makeCardTexture(suit) {
+    const W = 128, H = 176;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#fdf6ec'; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(60,20,80,0.8)'; ctx.lineWidth = 6;
+    ctx.strokeRect(4, 4, W - 8, H - 8);
+    ctx.strokeStyle = 'rgba(60,20,80,0.35)'; ctx.lineWidth = 2;
+    ctx.strokeRect(12, 12, W - 24, H - 24);
+    const red = suit === 0 || suit === 1;
+    ctx.fillStyle = red ? '#e02a4d' : '#2b2b33';
+    const suits = ['♥', '♦', '♠', '♣'];
+    ctx.font = '70px serif';
+    ctx.fillText(suits[suit % 4], W / 2, H / 2 + 4);
+    ctx.font = '900 30px serif';
+    ctx.fillText('A', 26, 28);
+    ctx.fillText('A', W - 26, H - 28);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  const coinGeo = new THREE.CylinderGeometry(COIN_R * 0.97, COIN_R, CT, 32);
   const billGeo = new THREE.BoxGeometry(BW, BT, BH);
   const cardGeo = new THREE.BoxGeometry(CARD_W, CARD_T, CARD_H);
 
+  // Coins use a two-material setup: a plain reeded gold EDGE band on the
+  // cylinder side + the embossed face texture on top/bottom caps. This stops
+  // the texture from stretching around the rim and reads as a real casino
+  // token rather than a flat sticker wrapped over a box.
+  const coinFaceMats = [0, 1, 2].map(v => new THREE.MeshStandardMaterial({
+    map: makeCoinTexture(v), roughness: 0.3, metalness: 0.9,
+    emissive: 0x553300, emissiveIntensity: 0.07,
+  }));
+  const coinEdgeMat = new THREE.MeshStandardMaterial({
+    color: 0xc99a3a, roughness: 0.35, metalness: 0.92,
+    emissive: 0x553300, emissiveIntensity: 0.07,
+  });
+
   const mats = {
-    coin: [
-      new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.1, metalness: 0.9, emissive: 0xaa6600, emissiveIntensity: 0.12 }),
-      new THREE.MeshStandardMaterial({ color: 0xeebb22, roughness: 0.15, metalness: 0.85, emissive: 0x886600, emissiveIntensity: 0.08 }),
-      new THREE.MeshStandardMaterial({ color: 0xfff066, roughness: 0.08, metalness: 0.9, emissive: 0xccaa00, emissiveIntensity: 0.15 }),
-    ],
-    bill: [
-      new THREE.MeshStandardMaterial({ color: 0x22ee77, roughness: 0.2, metalness: 0.1, emissive: 0x008844, emissiveIntensity: 0.12 }),
-      new THREE.MeshStandardMaterial({ color: 0x66ff99, roughness: 0.15, metalness: 0.1, emissive: 0x00aa55, emissiveIntensity: 0.18 }),
-      new THREE.MeshStandardMaterial({ color: 0x11cc55, roughness: 0.25, metalness: 0.1, emissive: 0x006633, emissiveIntensity: 0.08 }),
-    ],
-    card: [
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.1, metalness: 0.0, emissive: 0x6644aa, emissiveIntensity: 0.05 }),
-      new THREE.MeshStandardMaterial({ color: 0xffeedd, roughness: 0.1, metalness: 0.0, emissive: 0x8855cc, emissiveIntensity: 0.08 }),
-    ],
+    // CylinderGeometry material groups: [side, top cap, bottom cap]
+    coin: [0, 1, 2].map(v => [coinEdgeMat, coinFaceMats[v], coinFaceMats[v]]),
+    bill: [0, 1].map(v => new THREE.MeshStandardMaterial({
+      map: makeBillTexture(v), roughness: 0.4, metalness: 0.05,
+      emissive: 0x003311, emissiveIntensity: 0.1,
+    })),
+    card: [0, 1, 2, 3].map(v => new THREE.MeshStandardMaterial({
+      map: makeCardTexture(v), roughness: 0.65, metalness: 0.0,
+      emissive: 0x220044, emissiveIntensity: 0.04,
+    })),
   };
 
   function radiusOf(type) {
@@ -92,66 +210,32 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
     return result;
   }
 
-  function addCoinText(mesh, type = 'coin') {
-    const textMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25 });
-    if (type === 'coin') {
-      const sVert = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.003, 0.05), textMat);
-      sVert.position.set(-0.04, CT / 2 + 0.001, 0); mesh.add(sVert);
-      const sHoriz1 = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.003, 0.01), textMat);
-      sHoriz1.position.set(-0.04, CT / 2 + 0.001, 0.02); mesh.add(sHoriz1);
-      const sHoriz2 = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.003, 0.01), textMat);
-      sHoriz2.position.set(-0.04, CT / 2 + 0.001, -0.02); mesh.add(sHoriz2);
-      const oneV = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.003, 0.05), textMat);
-      oneV.position.set(0.06, CT / 2 + 0.001, 0); mesh.add(oneV);
-      const oneBase = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.003, 0.01), textMat);
-      oneBase.position.set(0.06, CT / 2 + 0.001, -0.03); mesh.add(oneBase);
-      const ringMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.1 });
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.025, 0.035, 12, 1), ringMat);
-      ring.position.set(-0.04, CT / 2 + 0.002, 0);
-      ring.rotation.x = -Math.PI / 2;
-      mesh.add(ring);
-    } else {
-      const sVert = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.003, 0.08), textMat);
-      sVert.position.set(0, BT / 2 + 0.002, 0); mesh.add(sVert);
-      const sHoriz1 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.003, 0.015), textMat);
-      sHoriz1.position.set(0, BT / 2 + 0.002, 0.035); mesh.add(sHoriz1);
-      const sHoriz2 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.003, 0.015), textMat);
-      sHoriz2.position.set(0, BT / 2 + 0.002, -0.035); mesh.add(sHoriz2);
-    }
-  }
-
   function makeCoinMesh(x, z, y) {
     const m = new THREE.Mesh(coinGeo, mats.coin[Math.floor(Math.random() * 3)]);
     m.position.set(x, y, z);
     m.rotation.y = Math.random() * Math.PI * 2;
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
-    addCoinText(m, 'coin');
     return m;
   }
 
   function makeBillMesh(x, z, y) {
-    const m = new THREE.Mesh(billGeo, mats.bill[Math.floor(Math.random() * 3)]);
+    const m = new THREE.Mesh(billGeo, mats.bill[Math.floor(Math.random() * 2)]);
     m.position.set(x, y, z);
     m.rotation.y = Math.random() * Math.PI * 2;
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
-    addCoinText(m, 'dollar');
     return m;
   }
 
   function makeCardMesh(x, z) {
     const y = platform.surfaceY + CARD_T / 2 + 0.01;
-    const mat = mats.card[Math.floor(Math.random() * 2)];
+    const mat = mats.card[Math.floor(Math.random() * 4)];
     const m = new THREE.Mesh(cardGeo, mat);
     m.position.set(x, y, z);
     m.rotation.y = Math.random() * Math.PI * 2;
     m.castShadow = true; m.receiveShadow = true;
     group.add(m);
-    const sm = new THREE.MeshBasicMaterial({ color: 0xff2244, transparent: true, opacity: 0.15 });
-    const suit = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.003, 0.04), sm);
-    suit.position.set(0, CARD_T / 2 + 0.001, 0);
-    m.add(suit);
     const cardId = `card_${++cardCounter}`;
     m.userData = { isCard: true, cardId, collected: false };
     return m;
@@ -213,16 +297,27 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
     }
 
     for (let iter = 0; iter < 8; iter++) {
-      resolveCollisions(); clampToPlatform();
+      resolveCollisions(); resolveVertical(); clampToPlatform();
     }
+    // Settle to rest heights (raise any coin that sank below the surface) —
+    // never flatten the whole field, otherwise the stacks below get wiped.
     for (const o of objects) {
-      if (o.state === 'sliding') {
-        const h = halfH(o.type);
-        o.y = (o.onShelf ? platform.shelfSurfaceY : platform.surfaceY) + h;
+      if (o.state === 'sliding' && o.type !== 'card') {
+        o.y = Math.max(o.y, restHeight(o));
       }
     }
 
     spawnCoinStacks(2);
+    // Give the fresh stacks a few settle iterations too, so overlapping coins
+    // resolve into tidy towers instead of clipping into each other on frame 1.
+    for (let iter = 0; iter < 10; iter++) {
+      resolveCollisions(); resolveVertical(); clampToPlatform();
+    }
+    for (const o of objects) {
+      if (o.state === 'sliding' && o.type !== 'card') {
+        o.y = Math.max(o.y, restHeight(o));
+      }
+    }
   }
 
   function spawnCoinStacks(count) {
@@ -245,9 +340,18 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
     objects.length = 0;
   }
 
-  function surfaceYFor(o) {
-    if (o.onShelf) return platform.shelfSurfaceY;
-    return platform.surfaceY;
+  // Resting height for a sliding object at its current (x, z): shelf top when
+  // on the shelf, the descending ramp between the slope start and the front
+  // drop edge, otherwise the flat felt surface. Used to keep coins from ever
+  // sinking into the platform geometry.
+  function restHeight(o) {
+    const h = halfH(o.type);
+    if (o.onShelf) return platform.shelfSurfaceY + h;
+    if (o.z > platform.slopeStartZ && o.z < platform.frontDropZ) {
+      const t = Math.max(0, Math.min(1, (o.z - platform.slopeStartZ) / (platform.slopeEndZ - platform.slopeStartZ)));
+      return platform.surfaceY + h - t * platform.slopeDrop;
+    }
+    return platform.surfaceY + h;
   }
 
   // --- Cascading disturbance when a coin falls off the front edge ---
@@ -495,7 +599,13 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
       // through the floor forever and were never collected, killing the whole
       // economy. Cards arrive in 'floating' state. 'falling' coins spawn at
       // the drop slot (z = -1.5) and never approach winZ, so no false hits.
-      if (o.z > platform.winZ) {
+      // Collect at the WIN line as usual, AND as soon as a dropped coin has
+      // visibly sunk past the front edge (z past frontDropZ, y below the
+      // surface). The second rule means a coin that tips into the win well
+      // is collected the instant it disappears under the felt instead of
+      // tumbling invisibly for ~a second until it drifts to winZ.
+      const sunkPastEdge = o.z > platform.frontDropZ && o.y < platform.surfaceY - 0.05;
+      if (o.z > platform.winZ || sunkPastEdge) {
         const zone = platform.getZoneType(o.x);
         if (o.type === 'card') {
           result[zone].cards.push(o.mesh.userData.cardId);
@@ -579,7 +689,15 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
           o.x += o.vx * subDt;
 
           if (o.y <= platform.surfaceY + halfH(o.type) && o.z < platform.frontDropZ) {
-            o.y = platform.surfaceY + halfH(o.type);
+            // Land on the actual surface below — the flat felt OR the descent
+            // slope — so a coin dropped onto the ramp doesn't pop up by the
+            // slope drop amount on the very first frame it becomes sliding.
+            let landY = platform.surfaceY + halfH(o.type);
+            if (o.z > platform.slopeStartZ && o.z < platform.slopeEndZ) {
+              const t = Math.max(0, Math.min(1, (o.z - platform.slopeStartZ) / (platform.slopeEndZ - platform.slopeStartZ)));
+              landY = platform.surfaceY + halfH(o.type) - t * platform.slopeDrop;
+            }
+            o.y = landY;
             o.vy = 0;
             o.vx *= 0.3;
             o.vz *= 0.3;
@@ -676,6 +794,17 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
       resolveCollisions();
       resolveVertical();
       clampToPlatform();
+      // Floor clamp: sliding objects can never sink below their resting
+      // height (vertical collision pushes + slope forces otherwise drive
+      // coins into the platform geometry — the "coins inside the machine"
+      // artifact). Stacks are safe: the clamp only ever RAISES objects.
+      for (let ci = 0; ci < objects.length; ci++) {
+        const c = objects[ci];
+        if (c.state === 'sliding' && c.type !== 'card') {
+          const rh = restHeight(c);
+          if (c.y < rh) c.y = rh;
+        }
+      }
       applyShelfPush(subDt);
 
       for (let i = 0; i < objects.length; i++) {
@@ -712,16 +841,24 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
         o.mesh.rotation.x = Math.sin(now * 0.01 + o.x) * 0.1;
         o.mesh.rotation.z = Math.cos(now * 0.01 + o.z) * 0.1;
       } else if (o.state === 'dropping') {
-        o.mesh.rotation.y += dt * 3;
-        o.mesh.rotation.x += dt * 2;
-        o.mesh.rotation.z += dt * 1.5;
+        // A gentle natural tumble while falling into the well (collected
+        // almost immediately now, so this barely shows).
+        o.mesh.rotation.x += dt * 1.8;
+        o.mesh.rotation.z += dt * 1.1;
       } else if (o.state === 'sliding') {
+        // Distance-based rolling: the rotation delta matches how far the coin
+        // actually travelled this frame (angle = distance / radius), so a
+        // resting or creeping coin does NOT spin in place — the old code
+        // accumulated rotation per-frame from velocity, so even a coin with
+        // vz = 0.02 visibly spun several revolutions per second.
+        const R = radiusOf(o.type);
+        o.mesh.rotation.x += (o.vz * dt) / R;
+        o.mesh.rotation.z -= (o.vx * dt) / R;
         const speed = Math.sqrt(o.vx * o.vx + o.vz * o.vz);
-        if (speed > 0.005) {
-          o.mesh.rotation.x += o.vz * 0.5;
-          o.mesh.rotation.z -= o.vx * 0.5;
+        if (speed > 0.05) {
+          o.mesh.rotation.y += (o.vz * 0.06) * dt; // tiny yaw while drifting
         }
-        if (Math.abs(o.vz) > 0.005) o.mesh.rotation.y += o.vz * 0.3;
+        o.mesh.rotation.y *= 0.94; // yaw decays — no endless yaw-spin
       }
 
       o.mesh.position.set(o.x, o.y, o.z);

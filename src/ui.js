@@ -209,6 +209,8 @@ export function createUI(gameState, callbacks) {
   function renderUpgrades() {
     el.upgradesList.innerHTML = '';
     // Group upgrades by category, then render a section header for each group.
+    // Each category gets a tinted header chip + colored left accent on items
+    // (colors live in style.css under .cat-<name>).
     const order = [CATEGORY.ECONOMY, CATEGORY.PUSH, CATEGORY.CAPACITY, CATEGORY.LUCK, CATEGORY.CURRENCY, CATEGORY.META];
     order.forEach(cat => {
       const items = UPGRADES.filter(u => u.category === cat);
@@ -216,7 +218,7 @@ export function createUI(gameState, callbacks) {
       const header = document.createElement('div');
       header.className = 'upgrade-category-header cat-' + cat;
       const key = 'category' + cat.charAt(0).toUpperCase() + cat.slice(1);
-      header.textContent = t(key);
+      header.textContent = '◆ ' + t(key);
       el.upgradesList.appendChild(header);
       items.forEach(renderUpgradeItem);
     });
@@ -237,8 +239,27 @@ export function createUI(gameState, callbacks) {
       ? '⇧ ' + affordableCount + ' for 🪙' + bulkTotal.toLocaleString()
       : null;
 
+    // Effect preview: what the upgrade does NOW vs what it does at the NEXT
+    // level. The old cards only showed "Level x/y" and a price, so buying was
+    // a leap of faith — now the delta is right there on the card.
+    const effectNow = formatEffect(upgrade, level);
+    const effectNext = maxed ? '' : formatEffect(upgrade, level + 1);
+    const effectHtml = effectNow
+      ? '<div class="upgrade-effect">' + effectNow
+        + (effectNext && effectNext !== effectNow
+            ? ' <span class="effect-arrow">→</span> <span class="effect-next">' + effectNext + '</span>'
+            : '')
+        + '</div>'
+      : '';
+
+    // Level progress bar: quick visual read of how close to max an upgrade is.
+    const progress = Math.round((level / upgrade.maxLevel) * 100);
+    const barHtml = '<div class="upgrade-bar-wrap"><div class="upgrade-bar' + (maxed ? ' maxed' : '') + '" style="width:' + progress + '%"></div></div>';
+
     const item = document.createElement('div');
-    let cls = 'upgrade-item cat-' + upgrade.category + (maxed ? ' bought' : '');
+    let cls = 'upgrade-item cat-' + upgrade.category
+      + (maxed ? ' bought' : '')
+      + (canAfford && !maxed ? ' affordable' : '');
     item.className = cls;
 
     const costLabel = maxed
@@ -246,7 +267,15 @@ export function createUI(gameState, callbacks) {
       : (showBulk
           ? '<span class="upgrade-cost-bulk">' + bulkLabel + '</span><span class="upgrade-cost-single">🪙' + cost.toLocaleString() + '</span>'
           : '🪙' + cost.toLocaleString());
-    item.innerHTML = '<div class="upgrade-icon">' + upgrade.icon + '</div><div class="upgrade-info"><div class="upgrade-name">' + upgrade.name + '</div><div class="upgrade-desc">' + upgrade.desc + '</div><div class="upgrade-level">' + t('level') + ' ' + level + '/' + upgrade.maxLevel + '</div></div><div class="upgrade-cost ' + (canAfford || maxed ? '' : 'locked') + '">' + costLabel + '</div>';
+    item.innerHTML = '<div class="upgrade-icon">' + upgrade.icon + '</div>'
+      + '<div class="upgrade-info">'
+      + '<div class="upgrade-name">' + upgrade.name + '</div>'
+      + '<div class="upgrade-desc">' + upgrade.desc + '</div>'
+      + effectHtml
+      + barHtml
+      + '<div class="upgrade-level">' + t('level') + ' ' + level + '/' + upgrade.maxLevel + '</div>'
+      + '</div>'
+      + '<div class="upgrade-cost ' + (canAfford || maxed ? '' : 'locked') + '">' + costLabel + '</div>';
 
     if (!maxed) {
       item.style.cursor = canAfford ? 'pointer' : 'not-allowed';

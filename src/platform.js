@@ -9,7 +9,10 @@ export function createPlatform(scene) {
   const surfaceY = H + 0.04;
   const playBack = -D / 2 + 0.25;
   const playFront = D / 2 - 1.4;
-  const wallBack = -D / 2 - 0.06;
+  // Back wall pushed well clear of the pusher shelf: the shelf retracts to
+  // SHELF_NEUTRAL_Z - SHELF_DEPTH/2 - SHELF_AMPLITUDE and used to punch
+  // straight through the back glass. This keeps the mechanism fully inside.
+  const wallBack = -D / 2 - 1.05;
   const leftEdge = -W / 2 + 0.3;
   const rightEdge = W / 2 - 0.3;
   const centerX = 0;
@@ -51,7 +54,7 @@ export function createPlatform(scene) {
   // === PUSHER SHELF CONSTANTS ===
   const SHELF_DEPTH = 3.2;
   const SHELF_NEUTRAL_Z = -1.2;
-  const SHELF_AMPLITUDE = 1.0;
+  const SHELF_AMPLITUDE = 0.9;
   const SHELF_SPEED = 1.2;
   const SHELF_THICKNESS = 0.08;
   const SHELF_TOP = surfaceY + SHELF_THICKNESS;
@@ -171,7 +174,6 @@ export function createPlatform(scene) {
   // COOL CASINO BACK WALL (Casual Innovation!)
   // ============================================================
   const wallH = 2.8;
-  const decoZ = wallBack + 0.01;
 
   // Base — dark velvet backdrop that became transparent: a single plain
   // MeshStandardMaterial with low opacity is the reliable choice over mixing
@@ -208,7 +210,13 @@ export function createPlatform(scene) {
     depthWrite: false,
   });
   const glowPlane = new THREE.Mesh(new THREE.PlaneGeometry(W + 0.25, wallH - 0.1), glowMat);
-  glowPlane.position.set(0, H + wallH / 2, wallBack + 0.04);
+  glowPlane.position.set(0, H + wallH / 2, wallBack + 0.12);
+
+  // Base neon strip along the bottom of the wall — a clean magenta accent.
+  const baseNeonMat = new THREE.MeshStandardMaterial({ color: 0xcc88ff, emissive: 0xaa44ff, emissiveIntensity: 2.0 });
+  const baseNeon = new THREE.Mesh(new THREE.BoxGeometry(W + 0.15, 0.03, 0.03), baseNeonMat);
+  baseNeon.position.set(0, H + 0.12, wallBack + 0.14);
+  group.add(baseNeon);
   glowPlane.renderOrder = 2;
   group.add(glowPlane);
 
@@ -220,20 +228,20 @@ export function createPlatform(scene) {
   // top + bottom rails
   [{ x: 0, y: H + wallH + 0.07, w: fW }, { x: 0, y: H - 0.06, w: fW }].forEach(({ x, y, w }) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, fT, fT), frameGoldMat);
-    m.position.set(x, y, wallBack + 0.05);
+    m.position.set(x, y, wallBack + 0.11);
     group.add(m);
   });
   // left + right rails
   [{ x: -fW / 2 + fT / 2 }, { x: fW / 2 - fT / 2 }].forEach(({ x }) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(fT, fH, fT), frameGoldMat);
-    m.position.set(x, H + wallH / 2, wallBack + 0.05);
+    m.position.set(x, H + wallH / 2, wallBack + 0.11);
     group.add(m);
   });
 
   // === HERO $ COIN — huge central coin that slowly rotates ===
   // Built in a group so we can rotate everything together.
   const heroCoinGroup = new THREE.Group();
-  heroCoinGroup.position.set(0, H + 1.55, wallBack + 0.07);
+  heroCoinGroup.position.set(0, H + 1.30, wallBack + 0.13);
   group.add(heroCoinGroup);
 
   const heroCoinMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xc88a00, emissiveIntensity: 1.4, roughness: 0.12, metalness: 0.95 });
@@ -279,82 +287,77 @@ export function createPlatform(scene) {
     bs2.position.set(-dS2.position.x, -dS2.position.y, z);
     heroCoinGroup.add(bs2);
   });
-  // Halo (radial glow behind coin)
-  const haloMat = new THREE.MeshBasicMaterial({ color: 0xffe680, transparent: true, opacity: 0.20, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(1.05, 32), haloMat);
-  halo.position.set(0, 0, -0.06);
-  heroCoinGroup.add(halo);
-
-  // === JACKPOT MARQUEE — 7 fat $ signs across the top, blinking in wave ===
-  const jackpotLetters = [];
-  const jackpotBaseMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0x884400, emissiveIntensity: 0.6 });
-  const jackpotY = H + wallH - 0.32;
-  for (let i = 0; i < 7; i++) {
-    const x = -2.7 + i * 0.9;
-    const letter = new THREE.Group();
-    letter.position.set(x, jackpotY, wallBack + 0.06);
-    const v = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.45, 0.04), jackpotBaseMat.clone());
-    letter.add(v);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.07, 0.04), jackpotBaseMat.clone());
-    t.position.y = 0.18;
-    letter.add(t);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.07, 0.04), jackpotBaseMat.clone());
-    b.position.y = -0.18;
-    letter.add(b);
-    const s1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.04), jackpotBaseMat.clone());
-    s1.position.set(-0.045, 0.05, 0);
-    letter.add(s1);
-    const s2 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.04), jackpotBaseMat.clone());
-    s2.position.set(0.045, -0.05, 0);
-    letter.add(s2);
-    group.add(letter);
-    jackpotLetters.push({ meshes: [v, t, b, s1, s2], phase: i * 0.18 });
+  // === "COIN PUSHER" NEON MARQUEE — a proper backlit arcade sign ===
+  // Replaces the old blocky $ glyphs and scattered bulb-chase: a canvas-textured
+  // sign (gold gradient + glow) hanging between the columns, gently breathing.
+  function makeMarqueeTexture() {
+    const W = 1024, H = 224;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    // Outer gold frame
+    const frame = ctx.createLinearGradient(0, 0, 0, H);
+    frame.addColorStop(0, '#ffe9a3'); frame.addColorStop(0.5, '#ffd700'); frame.addColorStop(1, '#b8860b');
+    ctx.fillStyle = frame;
+    ctx.fillRect(0, 0, W, H);
+    // Inner dark panel
+    ctx.fillStyle = '#150527';
+    ctx.fillRect(14, 14, W - 28, H - 28);
+    // Inner gold hairline
+    ctx.strokeStyle = 'rgba(255, 215, 0, 0.55)'; ctx.lineWidth = 3;
+    ctx.strokeRect(26, 26, W - 52, H - 52);
+    // Neon text
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = '900 104px Orbitron, Arial, sans-serif';
+    const tg = ctx.createLinearGradient(0, H * 0.25, 0, H * 0.85);
+    tg.addColorStop(0, '#fff8d0'); tg.addColorStop(0.45, '#ffd700'); tg.addColorStop(1, '#e8930c');
+    ctx.shadowColor = 'rgba(255, 200, 40, 0.95)'; ctx.shadowBlur = 34;
+    ctx.fillStyle = tg;
+    ctx.fillText('COIN PUSHER', W / 2, H / 2 + 4);
+    ctx.shadowBlur = 0;
+    // Sparkle accents at the ends
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.9)';
+    ctx.font = '900 58px Orbitron, Arial, sans-serif';
+    ctx.fillText('✦', 82, H / 2 + 2);
+    ctx.fillText('✦', W - 82, H / 2 + 2);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
   }
-
-  // === $ BULB CHASE — 13 small $ glyphs at mid-height, blink in sequence ===
-  const dollarBulbs = [];
-  const bulbBaseMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xfff4a3, emissiveIntensity: 1.5 });
-  const bulbY = H + 0.85;
-  for (let i = 0; i < 13; i++) {
-    const x = -3.3 + i * 0.55;
-    const bulb = new THREE.Group();
-    bulb.position.set(x, bulbY, wallBack + 0.06);
-    const v = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.22, 0.03), bulbBaseMat.clone());
-    bulb.add(v);
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.03), bulbBaseMat.clone());
-    t.position.y = 0.08;
-    bulb.add(t);
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.04, 0.03), bulbBaseMat.clone());
-    b.position.y = -0.08;
-    bulb.add(b);
-    group.add(bulb);
-    dollarBulbs.push({ meshes: [v, t, b], phase: i * 0.16 });
-  }
+  const marqueeMat = new THREE.MeshBasicMaterial({
+    map: makeMarqueeTexture(), transparent: true,
+    side: THREE.DoubleSide, toneMapped: false,
+  });
+  const marquee = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 0.72), marqueeMat);
+  marquee.position.set(0, H + 2.95, wallBack + 0.13);
+  group.add(marquee);
 
   // === SIDE COLUMNS — gold pillars with chip stacks + glowing orb on top ===
+  // Placed at ±2.55 so they flank the new marquee sign instead of poking
+  // through it (they used to sit at ±1.65, straight through the sign plane).
   const sideColumns = [];
-  [-1.65, 1.65].forEach((sx, idx) => {
+  [-2.55, 2.55].forEach((sx, idx) => {
     const pillarMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.18, metalness: 0.92, emissive: 0xcc8800, emissiveIntensity: 0.7 });
     const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 2.2, 12), pillarMat);
-    pillar.position.set(sx, H + 1.30, wallBack + 0.06);
+    pillar.position.set(sx, H + 1.30, wallBack + 0.13);
     group.add(pillar);
     const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.18, 12), pillarMat);
-    cap.position.set(sx, H + 2.50, wallBack + 0.06);
+    cap.position.set(sx, H + 2.50, wallBack + 0.13);
     group.add(cap);
     const base = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.12, 12), pillarMat);
-    base.position.set(sx, H + 0.25, wallBack + 0.06);
+    base.position.set(sx, H + 0.25, wallBack + 0.13);
     group.add(base);
     // Glowing orb on top
     const orb = new THREE.Mesh(new THREE.SphereGeometry(0.10, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0xffe680, transparent: true, opacity: 0.85 }));
-    orb.position.set(sx, H + 2.7, wallBack + 0.06);
+    orb.position.set(sx, H + 2.7, wallBack + 0.13);
     group.add(orb);
     // Chip stack beside the column base
     const chipColors = [0xff2244, 0x44ff88, 0x4488ff, 0xffaa22, 0xcc66ff];
     for (let i = 0; i < 5; i++) {
       const chipMat = new THREE.MeshStandardMaterial({ color: chipColors[i % chipColors.length], emissive: chipColors[i % chipColors.length], emissiveIntensity: 0.45, roughness: 0.3, metalness: 0.5 });
       const chip = new THREE.Mesh(new THREE.CylinderGeometry(0.20, 0.20, 0.045, 12), chipMat);
-      chip.position.set(sx + (idx === 0 ? -0.4 : 0.4), H + 0.40 + i * 0.05, wallBack + 0.10);
+      chip.position.set(sx + (idx === 0 ? -0.4 : 0.4), H + 0.40 + i * 0.05, wallBack + 0.16);
       group.add(chip);
     }
     sideColumns.push({ orb, phase: idx * 0.5 });
@@ -363,7 +366,7 @@ export function createPlatform(scene) {
   // === LARGE SIDE $ GLYPHS — giant $ decorations on the corners ===
   [-3.25, 3.25].forEach((sx) => {
     const bigDollar = new THREE.Group();
-    bigDollar.position.set(sx, H + 2.05, wallBack + 0.07);
+    bigDollar.position.set(sx, H + 2.05, wallBack + 0.13);
     const mat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 2.2 });
     const bv = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.78, 0.05), mat);
     bigDollar.add(bv);
@@ -382,62 +385,17 @@ export function createPlatform(scene) {
     group.add(bigDollar);
   });
 
-  // === ROULETTE WHEEL — slow-spin, left side ===
-  const wheelGroup = new THREE.Group();
-  wheelGroup.position.set(-3.30, H + 1.05, wallBack + 0.06);
-  const wheelRimMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xaa6600, emissiveIntensity: 1.4, metalness: 0.92, roughness: 0.2 });
-  const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.045, 12, 24), wheelRimMat);
-  wheelGroup.add(wheelRim);
-  const wheelDisc = new THREE.Mesh(new THREE.CylinderGeometry(0.43, 0.43, 0.02, 24),
-    new THREE.MeshStandardMaterial({ color: 0x2a1010, roughness: 0.5, metalness: 0.3, emissive: 0x110505, emissiveIntensity: 0.3 }));
-  wheelDisc.rotation.x = Math.PI / 2;
-  wheelGroup.add(wheelDisc);
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
-    const color = i % 2 === 0 ? 0xff2244 : 0x111111;
-    const dot = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.06, 8),
-      new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6, metalness: 0.4, roughness: 0.4 }));
-    dot.position.set(Math.cos(angle) * 0.27, Math.sin(angle) * 0.27, 0);
-    dot.rotation.x = Math.PI / 2;
-    wheelGroup.add(dot);
-  }
-  const hub = new THREE.Mesh(new THREE.SphereGeometry(0.08, 16, 16),
-    new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 1.4, metalness: 0.92, roughness: 0.2 }));
-  hub.position.z = 0.05;
-  wheelGroup.add(hub);
-  // Fixed arrow indicator (stays put while wheel spins)
-  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 8),
-    new THREE.MeshStandardMaterial({ color: 0xff4444, emissive: 0xff2222, emissiveIntensity: 1.6 }));
-  arrow.position.set(0, 0.55, 0.05);
-  wheelGroup.add(arrow);
-  group.add(wheelGroup);
-
-  // === DICE — right side decoration ===
-  const diceGroup = new THREE.Group();
-  diceGroup.position.set(3.30, H + 1.05, wallBack + 0.07);
-  const dieMat = new THREE.MeshStandardMaterial({ color: 0xffeeee, roughness: 0.3, metalness: 0.15, emissive: 0x222222, emissiveIntensity: 0.12 });
-  const die1 = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), dieMat);
-  die1.rotation.set(0.3, 0.4, 0.18);
-  diceGroup.add(die1);
-  // Pip dots on a face (face 3)
-  for (const [px, py, pz] of [[-0.13, 0.13, 0.21], [0, 0, 0.21], [0.13, -0.13, 0.21]]) {
-    const pip = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 8),
-      new THREE.MeshBasicMaterial({ color: 0x222222 }));
-    pip.position.set(px, py, pz);
-    die1.add(pip);
-  }
-  group.add(diceGroup);
+  // (Roulette wheel + dice decorations removed — they floated loosely on the
+  // wall and read as noise. The marquee, hero coin, pillars and corner $
+  // glyphs carry the casino wall now.)
 
   // === ANIMATION TARGETS — picked up by updateMechanism() each frame ===
   group.userData = group.userData || {};
   group.userData.wallAnims = {
     heroCoinGroup,
-    halo,
-    jackpotLetters,
-    dollarBulbs,
     sideColumns,
-    wheelGroup,
     frameGoldMat,
+    marquee,
   };
 
   // === CABINET SIDE PANELS (thick, styled like real arcade machine sides) ===
@@ -486,7 +444,7 @@ export function createPlatform(scene) {
   // Back glass panel (keeps coins from escaping behind)
   const backGlass = new THREE.Mesh(new THREE.BoxGeometry(W + 0.3, 2.5, 0.06),
     new THREE.MeshPhysicalMaterial({ color: 0xddbbff, transparent: true, opacity: 0.04, roughness: 0.05, metalness: 0.0, side: THREE.DoubleSide, depthWrite: false }));
-  backGlass.position.set(0, H + 2.0, wallBack + 0.12);
+  backGlass.position.set(0, H + 2.0, wallBack + 0.55);
   backGlass.renderOrder = 3;
   group.add(backGlass);
 
@@ -640,8 +598,10 @@ export function createPlatform(scene) {
   group.add(chuteLED);
 
   // === SLOPE: coins slide downhill from shelf front to win/holes ===
+  // Slope now runs all the way to the drop edge (was ending 0.4u short,
+  // leaving an invisible up-hill lip that coins had to climb).
   const SLOPE_START_Z = SHELF_NEUTRAL_Z + SHELF_DEPTH / 2 + 0.2;
-  const SLOPE_END_Z = D / 2 - 1.8;
+  const SLOPE_END_Z = D / 2 - 1.45;
   const SLOPE_DROP = 0.18;
   const slopeLen = SLOPE_END_Z - SLOPE_START_Z;
   const slopeMat = new THREE.MeshStandardMaterial({ color: 0x3a1a55, roughness: 0.6, metalness: 0.3, emissive: 0x1a0a30, emissiveIntensity: 0.2 });
@@ -727,40 +687,21 @@ export function createPlatform(scene) {
     // === WALL ANIMATIONS ===
     const wallAnims = group.userData && group.userData.wallAnims;
     if (wallAnims) {
-      // Hero coin spins around vertical axis (lettuce-round spin; both
-      // face $ glyphs wired so it looks correct from any angle).
+      // Hero coin spins around its vertical axis (the $ glyphs are wired on
+      // both faces so it reads correctly from any angle).
       if (wallAnims.heroCoinGroup) {
-        wallAnims.heroCoinGroup.rotation.y = time * 0.35;
+        wallAnims.heroCoinGroup.rotation.y = time * 0.28;
       }
-      // Halo pulses around the coin
-      if (wallAnims.halo) {
-        const haloPulse = Math.sin(time * 1.4);
-        wallAnims.halo.material.opacity = 0.18 + 0.12 * haloPulse;
-        wallAnims.halo.scale.setScalar(1.0 + 0.08 * haloPulse);
-      }
-      // JACKPOT marquee letters wave-pulse left-to-right (smooth sine — no hard blink)
-      if (wallAnims.jackpotLetters) {
-        for (const letter of wallAnims.jackpotLetters) {
-          const lit = 1.0 + 1.6 * Math.sin(time * 2.4 + letter.phase);
-          for (const m of letter.meshes) m.material.emissiveIntensity = lit;
-        }
-      }
-      // $ bulbs chase across the wall (smooth sine — no hard blink)
-      if (wallAnims.dollarBulbs) {
-        for (const bulb of wallAnims.dollarBulbs) {
-          const lit = 1.2 + 2.0 * Math.sin(time * 2.8 + bulb.phase);
-          for (const m of bulb.meshes) m.material.emissiveIntensity = lit;
-        }
+      // Marquee sign breathes gently (subtle scale pulse).
+      if (wallAnims.marquee) {
+        const breathe = 0.5 + 0.5 * Math.sin(time * 1.2);
+        wallAnims.marquee.scale.set(1 + 0.02 * breathe, 1 + 0.02 * breathe, 1);
       }
       // Side column orbs pulse with offset phase
       if (wallAnims.sideColumns) {
         for (const col of wallAnims.sideColumns) {
           col.orb.material.opacity = 0.6 + 0.4 * Math.sin(time * 2 + col.phase);
         }
-      }
-      // Roulette wheel spins in the opposite direction (counter-clockwise)
-      if (wallAnims.wheelGroup) {
-        wallAnims.wheelGroup.rotation.z = -time * 0.4;
       }
       // Neon gold frame pulses (slow sine)
       if (wallAnims.frameGoldMat) {

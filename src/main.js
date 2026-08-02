@@ -164,23 +164,8 @@ const ui = createUI(gameState, {
 // Render gamble UI once after creation
 ui.renderGambleUI();
 
-// --- Title Effect (animated neon sign) ---
-function createTitleEffect() {
-  const group = new THREE.Group();
-  const blockMat = new THREE.MeshStandardMaterial({
-    color: 0xffdd44,
-    emissive: 0xff8800,
-    emissiveIntensity: 0.4,
-  });
-  const positions = [-2.4, -1.6, -0.8, 0, 0.8, 1.6, 2.4];
-  positions.forEach((lx) => {
-    const box = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 0.03), blockMat);
-    box.position.set(lx, platform.height + 2.3, -platform.depth / 2 - 0.11);
-    group.add(box);
-  });
-  scene.add(group);
-}
-createTitleEffect();
+// (Placeholder title blocks removed — the back wall now has a proper
+// "COIN PUSHER" neon marquee sign built into createPlatform().)
 
 // --- Neon particles (purple/gold) ---
 const particleSystem = (() => {

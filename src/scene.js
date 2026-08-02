@@ -31,18 +31,22 @@ export function createScene(container) {
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0e061a);
-  scene.fog = new THREE.FogExp2(0x0e061a, 0.025);
+  scene.background = new THREE.Color(0x0d0418);
+  scene.fog = new THREE.FogExp2(0x0d0418, 0.028);
 
-  // === GRADIENT SKYBOX ===
-  const skyGeo = new THREE.SphereGeometry(40, 64, 64);
+  // === NIGHT SKYBOX (procedural: stars, moon, neon horizon) ===
+  // One sphere + one shader: gradient sky, a hash-based star field that
+  // twinkles, a soft glowing moon, and a magenta/purple horizon band so the
+  // machine sits against a neon-lit casino night instead of a flat void.
+  const skyGeo = new THREE.SphereGeometry(40, 48, 48);
   const skyMat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
+    fog: false,
     uniforms: {
-      topColor: { value: new THREE.Color(0x1a0b38) },
-      bottomColor: { value: new THREE.Color(0x050210) },
-      offset: { value: 0.0 },
-      exponent: { value: 0.6 },
+      topColor: { value: new THREE.Color(0x1e0b3d) },
+      bottomColor: { value: new THREE.Color(0x0d0418) },
+      moonColor: { value: new THREE.Color(0xfff2c9) },
+      time: { value: 0.0 },
     },
     vertexShader: `
       varying vec3 vWorldPosition;
@@ -55,13 +59,53 @@ export function createScene(container) {
     fragmentShader: `
       uniform vec3 topColor;
       uniform vec3 bottomColor;
-      uniform float offset;
-      uniform float exponent;
+      uniform vec3 moonColor;
+      uniform float time;
       varying vec3 vWorldPosition;
+
+      float hash21(vec2 p) {
+        p = fract(p * vec2(234.34, 435.345));
+        p += dot(p, p + 34.23);
+        return fract(p.x * p.y);
+      }
+
       void main() {
-        float h = normalize(vWorldPosition + offset).y;
-        float t = max(pow(max(h, 0.0), exponent), 0.0);
-        gl_FragColor = vec4(mix(bottomColor, topColor, t), 1.0);
+        vec3 dir = normalize(vWorldPosition);
+        float h = dir.y;
+
+        // Vertical gradient (deep purple up top, near-black at the bottom).
+        float t = pow(max(h, 0.0), 0.6);
+        vec3 col = mix(bottomColor, topColor, t);
+
+        // Neon horizon band — magenta glow hugging the floor line.
+        float band = exp(-abs(h) * 12.0) * 0.35 + exp(-abs(h - 0.03) * 40.0) * 0.18;
+        col += vec3(0.55, 0.22, 0.75) * band;
+
+        // Star field (upper hemisphere only, hash-based so it's stable and
+        // cheap — no texture needed). Each star twinkles on its own phase.
+        if (h > 0.03) {
+          vec2 uv = vec2(atan(dir.z, dir.x), asin(dir.y)) * 26.0;
+          vec2 id = floor(uv);
+          float rnd = hash21(id);
+          float rnd2 = hash21(id + vec2(17.0, 7.0));
+          if (rnd > 0.82) {
+            vec2 f = fract(uv) - 0.5;
+            float d = length(f);
+            float tw = 0.55 + 0.45 * sin(time * (1.0 + rnd2 * 3.0) + rnd2 * 40.0);
+            float star = smoothstep(0.20, 0.02, d) * tw * (0.35 + 0.75 * rnd2);
+            col += vec3(1.0, 0.95, 0.88) * star;
+          }
+        }
+
+        // Moon with a soft halo, upper-left of the back wall.
+        vec3 moonDir = normalize(vec3(0.45, 0.52, -0.73));
+        float md = dot(dir, moonDir);
+        float disc = smoothstep(0.9955, 0.9980, md);
+        float glow = exp((md - 1.0) * 70.0);
+        col += moonColor * disc * 1.5;
+        col += vec3(0.85, 0.78, 0.95) * glow * 0.30;
+
+        gl_FragColor = vec4(col, 1.0);
       }
     `,
   });
@@ -363,6 +407,8 @@ export function createScene(container) {
     lanterns,
     smokeData,
     updateAmbient(time) {
+      // Skybox time uniform drives star twinkle + any future sky animation.
+      skyMat.uniforms.time.value = time;
       // Star-field twinkle: oscillate the master material opacity for the
       // 600-point star cloud so the night sky "breathes" without needing
       // a per-point material (which would balloon shader compile cost).
