@@ -1,0 +1,60 @@
+# Deploys the static Coin Pusher 3D site to GitHub Pages on every push to `main`.
+#
+# The game is fully client-side (Three.js, procedural assets), so the deploy
+# artifact is just index.html + src/style.css + the bundled dist/main.js.
+# The bundler keeps the relative paths index.html expects (src/style.css,
+# dist/main.js), so the assembled `deploy/` folder mirrors the repo layout.
+
+name: Deploy to GitHub Pages
+
+"on":
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Assemble static site
+        run: |
+          mkdir -p deploy/src deploy/dist
+          cp index.html deploy/
+          cp src/style.css deploy/src/
+          cp dist/main.js deploy/dist/
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
