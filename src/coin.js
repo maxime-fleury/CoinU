@@ -6,7 +6,10 @@ const CT = 0.06;
 const BW = 0.5, BH = 0.22, BT = 0.01;
 const CARD_W = 0.2, CARD_H = 0.28, CARD_T = 0.008;
 const MAX = 6000;
-const FRICTION = 0.987;
+// Damping is expressed per second so the simulation behaves consistently at
+// different frame rates. The old fixed-per-substep multiplier killed motion
+// too quickly and made the pusher feel sticky.
+const LINEAR_DAMPING = 2.8;
 const BOUNCE = 0.3;
 const GRAVITY = 14;
 const BOUNCE_THRESHOLD = 0.1;
@@ -22,9 +25,10 @@ const MAX_ACTIVE_CARDS = 6;
 
 const GRID_CELL = 0.6;
 
-export function createObjectSystem(scene, platform, existingCardCount = 0) {
+export function createObjectSystem(scene, platform, existingCardCount = 0, onImpact = null) {
   cardCounter = existingCardCount;
   const objects = [];
+  let lastImpactAt = 0;
   const group = new THREE.Group();
   scene.add(group);
 
@@ -257,6 +261,9 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
       mesh, type, x, y, z,
       vx: 0, vy: 0, vz: 0,
       state,
+      // Flat tokens can yaw on the felt from small impacts, but they must not
+      // pitch/roll onto their edge while sliding.
+      yawVelocity: (Math.random() - 0.5) * 0.12,
       spin: 0,
       _dropTime: 0,
       _slotTimer: 0,
@@ -378,8 +385,12 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
   // --- Spatial-hashed collision resolution ---
   function resolveCollisions() {
     gridClear();
+    // Keep pair lookups O(1). `objects.indexOf()` inside the neighbor loop
+    // became a noticeable hotspot once the machine filled up.
+    const objectIndices = new Map();
     for (let i = 0; i < objects.length; i++) {
       const o = objects[i];
+      objectIndices.set(o, i);
       if (o.state === 'dropping' || o.state === 'falling') continue;
       gridInsert(o);
     }
@@ -394,7 +405,8 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
       for (let k = 0; k < neighbors.length; k++) {
         const b = neighbors[k];
         if (b === a) continue;
-        const pairId = a < b ? i : objects.indexOf(b);
+        const pairId = objectIndices.get(b);
+        if (pairId === undefined) continue;
         const pairKey = i < pairId ? `${i}:${pairId}` : `${pairId}:${i}`;
         if (checked.has(pairKey)) continue;
         checked.add(pairKey);
@@ -426,6 +438,11 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
             b.x += nx * push; b.z += nz * push;
             const relV = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
             if (relV < 0) {
+              const now = performance.now();
+              if (onImpact && a.type === 'coin' && b.type === 'coin' && relV < -0.18 && now - lastImpactAt > 42) {
+                lastImpactAt = now;
+                onImpact(a.x + nx * aR, a.y, a.z + nz * aR, Math.min(1, Math.abs(relV)));
+              }
               const impulse = relV * BOUNCE * 0.5;
               a.vx += impulse * nx; a.vz += impulse * nz;
               b.vx -= impulse * nx; b.vz -= impulse * nz;
@@ -720,16 +737,24 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
             if (freshDrop || (inSlotX && nearSlot)) {
               o._slotTimer = (o._slotTimer || 0) + subDt;
             } else {
-              o.vz += platform.shelfVelocity * subDt * 1.5;
+              // The pusher plate carries coins through static friction, then
+              // lets the pile slip during the fast forward stroke. A
+              // velocity target is more stable than adding shelf acceleration
+              // forever and keeps motion proportional to the real mechanism.
+              const contact = platform.shelfVelocity > 0 ? 2.2 : 1.1;
+              o.vz += (platform.shelfVelocity - o.vz) * contact * subDt;
             }
           }
 
           o.x += o.vx * subDt;
           o.z += o.vz * subDt;
-          o.vx *= FRICTION;
-          o.vz *= FRICTION;
-          if (Math.abs(o.vx) < 0.001) o.vx = 0;
-          if (Math.abs(o.vz) < 0.001) o.vz = 0;
+          // Frame-rate independent kinetic friction. Keep a tiny amount of
+          // movement alive until static friction takes over below.
+          const damping = Math.exp(-LINEAR_DAMPING * subDt);
+          o.vx *= damping;
+          o.vz *= damping;
+          if (Math.abs(o.vx) < 0.004) o.vx = 0;
+          if (Math.abs(o.vz) < 0.004) o.vz = 0;
 
           if (o.onShelf) {
             const backWallZ = platform.shelfBackZ + COIN_R + 0.03;
@@ -840,19 +865,18 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
         o.mesh.rotation.x += dt * 1.8;
         o.mesh.rotation.z += dt * 1.1;
       } else if (o.state === 'sliding') {
-        // Distance-based rolling: the rotation delta matches how far the coin
-        // actually travelled this frame (angle = distance / radius), so a
-        // resting or creeping coin does NOT spin in place — the old code
-        // accumulated rotation per-frame from velocity, so even a coin with
-        // vz = 0.02 visibly spun several revolutions per second.
-        const R = radiusOf(o.type);
-        o.mesh.rotation.x += (o.vz * dt) / R;
-        o.mesh.rotation.z -= (o.vx * dt) / R;
+        // CylinderGeometry is already a flat token: its axis is Y, so X/Z
+        // rotation tips it upright. The old distance-based "rolling" code
+        // accumulated those axes and made coins roll vertically or wobble
+        // through the felt. Keep the token face parallel to the table and
+        // allow only a gentle in-plane yaw, like a real coin skidding on felt.
+        o.mesh.rotation.x = 0;
+        o.mesh.rotation.z = 0;
         const speed = Math.sqrt(o.vx * o.vx + o.vz * o.vz);
-        if (speed > 0.05) {
-          o.mesh.rotation.y += (o.vz * 0.06) * dt; // tiny yaw while drifting
-        }
-        o.mesh.rotation.y *= 0.94; // yaw decays — no endless yaw-spin
+        const skidYaw = speed > 0.05 ? (o.vx - o.vz) * 0.08 : 0;
+        o.yawVelocity += (skidYaw - o.yawVelocity) * Math.min(1, dt * 5);
+        o.yawVelocity *= Math.exp(-2.4 * dt);
+        o.mesh.rotation.y += o.yawVelocity * dt;
       }
 
       o.mesh.position.set(o.x, o.y, o.z);

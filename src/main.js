@@ -23,11 +23,20 @@ if (!sceneData) {
   console.warn('Aborting game init: WebGL unavailable.');
   throw new Error('WebGL unavailable');
 }
-const { scene, camera, renderer, controls, updateFlames, updateAmbient } = sceneData;
+const { scene, camera, renderer, controls, updateFlames, updateAmbient, pulseEvent } = sceneData;
 const platform = createPlatform(scene);
 const gameState = createGameState();
 const savedCardCount = (gameState.collectedCards || []).length;
-const objectSystem = createObjectSystem(scene, platform, savedCardCount);
+// Impact callbacks can fire while the object system is settling its initial
+// stacks, before the visual particle pool is created. Queue those rare events
+// instead of closing over a not-yet-initialized const.
+const pendingImpacts = [];
+let renderImpact = null;
+const objectSystem = createObjectSystem(scene, platform, savedCardCount, (x, y, z, strength) => {
+  const impact = { x, y, z, strength };
+  if (renderImpact) renderImpact(impact);
+  else pendingImpacts.push(impact);
+});
 
 // --- Callbacks (defined early so they're available when createUI references them) ---
 function handleDrop() {
@@ -37,6 +46,9 @@ function handleDrop() {
     for (let i = 0; i < count; i++) {
       setTimeout(() => objectSystem.dropObject(dropResult.pushForce, objType), i * 50);
     }
+    // A small chromatic burst at the drop slot sells the physical insertion
+    // without allocating a new effect object for every coin.
+    particleSystem.emit(platform.dropX, platform.dropHeight - 0.3, platform.dropZ, Math.min(12, count * 3));
     if (dropResult.comboBonus > 0) {
       ui.showNotification('🔥 Combo bonus +' + dropResult.comboBonus + ' coin!', 'success');
     }
@@ -232,6 +244,13 @@ const particleSystem = (() => {
   return { emit, update };
 })();
 
+renderImpact = ({ x, y, z, strength }) => {
+  playSound(strength > 0.55 ? 'sparkle' : 'coin');
+  particleSystem.emit(x, y + 0.04, z, strength > 0.55 ? 3 : 1);
+};
+for (const impact of pendingImpacts) renderImpact(impact);
+pendingImpacts.length = 0;
+
 // --- Auto-save ---
 autoSaveLoop(gameState);
 
@@ -300,6 +319,7 @@ function animate(time) {
     for (let i = 0; i < count; i++) {
       setTimeout(() => objectSystem.dropObject(result.pushForce, objType), i * 50);
     }
+    particleSystem.emit(platform.dropX, platform.dropHeight - 0.3, platform.dropZ, Math.min(10, count * 2));
     ui.showDropResult(result);
     ui.updateCombo(result.comboCount);
   });
@@ -386,6 +406,7 @@ function animate(time) {
       }
       
       if (coinsToAdd > 0) {
+        pulseEvent(coinsToAdd >= 5 ? 'bigwin' : 'win');
         ui.showNotification('\uD83C\uDF89 +' + coinsToAdd + ' ' + t('coinsEarned'), 'success');
         playSound(coinsToAdd >= 5 ? 'bigwin' : 'win');
         ui.showZoneFeedback('+' + coinsToAdd, 'win', window.innerWidth / 2 + (Math.random() - 0.5) * 100, window.innerHeight / 2 + 80);
@@ -403,6 +424,7 @@ function animate(time) {
         const jackpotBonus = tierRoll < 0.7 ? 25 : (tierRoll < 0.95 ? 50 : 100);
         ui.showJackpot(jackpotBonus);
         ui.screenShake(2);
+        pulseEvent('jackpot');
         playSound('jackpot');
         ui.showCoinRain(35); // Extra coin rain celebration
         // Extra bonus particles and a screen flash for the celebration.
@@ -500,7 +522,7 @@ function animate(time) {
   objectSystem.update(dt, time / 1000);
   particleSystem.update(dt);
   updateFlames(time / 1000);
-  updateAmbient(time / 1000);
+  updateAmbient(time / 1000, dt);
 
   ui.updateHUD();
 

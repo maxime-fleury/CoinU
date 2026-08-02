@@ -156,7 +156,15 @@ export function createScene(container) {
   const wallGlowRight = new THREE.PointLight(0xffd700, 0.6, 4);
   wallGlowRight.position.set(2.5, 2.0, -2.5); scene.add(wallGlowRight);
   const wallGlowCenter = new THREE.PointLight(0xffaa44, 0.5, 5);
-  wallGlowCenter.position.set(0, 2.5, -2.5); scene.add(wallGlowCenter);
+  wallGlowCenter.position.set(0, 2.5, -2.5);  scene.add(wallGlowCenter);
+
+  // A single pooled particle field keeps the room alive without creating a
+  // mesh per sparkle. Important events briefly amplify the same glow so wins
+  // feel like the whole arcade noticed them.
+  const eventGlow = new THREE.PointLight(0xff4fd8, 0.35, 7);
+  eventGlow.position.set(0, 2.4, 0.8);
+  scene.add(eventGlow);
+  const eventPulse = { strength: 0, color: new THREE.Color(0xff4fd8) };
 
   // === GOILDEN PILLARS WITH TORCH FLAMES ===
   const flameData = [];
@@ -267,6 +275,34 @@ export function createScene(container) {
   starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
   const stars = new THREE.Points(starGeo, starMat);
   scene.add(stars);
+
+  // Floating prism dust / magical arcade motes. Positions are deterministic
+  // after creation and reused every frame, keeping this to one draw call.
+  const moteCount = 240;
+  const moteGeo = new THREE.BufferGeometry();
+  const motePos = new Float32Array(moteCount * 3);
+  const moteColor = new Float32Array(moteCount * 3);
+  const motePhase = new Float32Array(moteCount);
+  const moteSpeed = new Float32Array(moteCount);
+  for (let i = 0; i < moteCount; i++) {
+    const i3 = i * 3;
+    motePos[i3] = (Math.random() - 0.5) * 14;
+    motePos[i3 + 1] = 0.35 + Math.random() * 5.2;
+    motePos[i3 + 2] = (Math.random() - 0.5) * 13 - 1;
+    moteColor[i3] = 0.7 + Math.random() * 0.3;
+    moteColor[i3 + 1] = 0.25 + Math.random() * 0.55;
+    moteColor[i3 + 2] = 0.8 + Math.random() * 0.2;
+    motePhase[i] = Math.random() * Math.PI * 2;
+    moteSpeed[i] = 0.08 + Math.random() * 0.18;
+  }
+  moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+  moteGeo.setAttribute('color', new THREE.BufferAttribute(moteColor, 3));
+  const moteMat = new THREE.PointsMaterial({
+    size: 0.055, vertexColors: true, transparent: true, opacity: 0.62,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const motes = new THREE.Points(moteGeo, moteMat);
+  scene.add(motes);
 
   // === GROUND (polished casino floor with checkered marble pattern) ===
   function createFloorTexture() {
@@ -400,13 +436,25 @@ export function createScene(container) {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  let moteUpdateAccumulator = 0;
+
   // Return animation data
   return {
     scene, camera, renderer, controls,
     flameData,
     lanterns,
     smokeData,
-    updateAmbient(time) {
+    pulseEvent(type = 'win') {
+      const colors = {
+        win: 0x39f7ff,
+        bigwin: 0xffd84d,
+        jackpot: 0xff4fd8,
+        lose: 0xff3e83,
+      };
+      eventPulse.color.set(colors[type] || colors.win);
+      eventPulse.strength = type === 'jackpot' ? 2.4 : (type === 'bigwin' ? 1.35 : 0.75);
+    },
+    updateAmbient(time, dt = 1 / 60) {
       // Skybox time uniform drives star twinkle + any future sky animation.
       skyMat.uniforms.time.value = time;
       // Star-field twinkle: oscillate the master material opacity for the
@@ -431,6 +479,30 @@ export function createScene(container) {
         s.mesh.position.y = s.baseY + Math.sin(time * 0.4 + s.phase) * 0.18;
         s.mesh.position.x = s.baseX + Math.sin(time * 0.25 + s.phase * 1.7) * 0.35;
       }
+
+      // Motes drift upward in lazy arcs; upload the shared buffer at 30Hz
+      // rather than forcing a GPU transfer on every render frame.
+      moteUpdateAccumulator += dt;
+      if (moteUpdateAccumulator >= 1 / 30) {
+        const moteStep = moteUpdateAccumulator;
+        moteUpdateAccumulator = 0;
+        const positions = moteGeo.attributes.position.array;
+        for (let i = 0; i < moteCount; i++) {
+          const i3 = i * 3;
+          positions[i3 + 1] += moteSpeed[i] * moteStep * 0.24;
+          positions[i3] += Math.sin(time * 0.45 + motePhase[i]) * moteStep * 0.05;
+          if (positions[i3 + 1] > 5.8) positions[i3 + 1] = 0.25;
+        }
+        moteGeo.attributes.position.needsUpdate = true;
+      }
+      moteMat.opacity = 0.42 + 0.20 * (0.5 + 0.5 * Math.sin(time * 0.9));
+
+      // Event light decays smoothly so a jackpot produces a satisfying flash
+      // without strobing or changing the scene's baseline exposure.
+      eventPulse.strength *= Math.exp(-4.5 * dt);
+      eventGlow.color.copy(eventPulse.color);
+      eventGlow.intensity = 0.35 + eventPulse.strength;
+      eventGlow.distance = 7 + eventPulse.strength * 2;
     },
     updateFlames(time) {
       for (const f of flameData) {

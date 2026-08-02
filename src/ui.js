@@ -3,7 +3,7 @@ import { UPGRADES, CATEGORY, getUpgradeCost, getAffordableLevels } from './upgra
 import { PRESTIGE_UPGRADES, getPrestigeCost } from './prestige.js';
 import { getUpgradeLevel, getEffectiveStats } from './game.js';
 import { t, getLang, setLang } from './i18n.js';
-import { setSoundEnabled as setAudioEnabled, isSoundEnabled as isAudioEnabled } from './audio.js';
+import { setSoundEnabled as setAudioEnabled, isSoundEnabled as isAudioEnabled, playSound } from './audio.js';
 
 export function createUI(gameState, callbacks) {
   const el = {
@@ -53,6 +53,7 @@ export function createUI(gameState, callbacks) {
   // Mirror the persisted audio preference from the audio module so the toggle
   // shows the real state (the previous hardcoded `true` desynced from it).
   let soundEnabled = isAudioEnabled();
+  let lastHoverSoundAt = 0;
 
   // --- Tab + panel title helpers ---
   // Single source of truth so elementsUpdateTexts / switchTab / refreshAllTexts
@@ -311,6 +312,7 @@ export function createUI(gameState, callbacks) {
     const notif = document.createElement('div');
     notif.className = 'notification ' + type;
     notif.textContent = message;
+    notif.setAttribute('role', 'status');
     el.notifications.appendChild(notif);
     setTimeout(() => { if (notif.parentNode) notif.remove(); }, 2500);
   }
@@ -626,7 +628,18 @@ export function createUI(gameState, callbacks) {
     }
   });
   el.currencyBtns.forEach(btn => {
-    btn.addEventListener('click', () => { if (callbacks.onCurrencySwitch) callbacks.onCurrencySwitch(btn.dataset.currency); });
+    btn.addEventListener('click', () => {
+      if (callbacks.onCurrencySwitch) callbacks.onCurrencySwitch(btn.dataset.currency);
+    });
+    btn.addEventListener('pointerenter', () => {
+      // A tiny hover cue is intentionally delegated to the shared audio
+      // manager only when the player can interact with the control.
+      const now = performance.now();
+      if (soundEnabled && now - lastHoverSoundAt > 120) {
+        lastHoverSoundAt = now;
+        playSound('click');
+      }
+    }, { passive: true });
   });
   el.tabs.forEach(tab => { tab.addEventListener('click', () => switchTab(tab.dataset.tab)); });
   el.panelToggle.addEventListener('click', () => { el.panelContent.classList.toggle('collapsed'); el.panelToggle.classList.toggle('collapsed'); });

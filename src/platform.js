@@ -15,7 +15,9 @@ export function createPlatform(scene) {
   const wallBack = -D / 2 - 1.05;
   const leftEdge = -W / 2 + 0.3;
   const rightEdge = W / 2 - 0.3;
-  const centerX = 0;
+  // Declared before the wall animation registry because the animated zone
+  // LEDs are created later in this function.
+  const zoneLeds = [];
 
   // === CABINET BASE ===
   // Real coin pusher machines have a solid cabinet with tapered/profiled sides.
@@ -119,8 +121,6 @@ export function createPlatform(scene) {
   target.position.set(0, H + 0.02, mechZ);
   mechGroup.add(target);
 
-  const mechParts = { slider, innerSlider, beam, target, railY, railSpan };
-
   group.add(mechGroup);
 
   // === PUSHER SHELF (oscillates back→front to push coins) ===
@@ -164,6 +164,18 @@ export function createPlatform(scene) {
   const shelfNeon = new THREE.Mesh(new THREE.BoxGeometry(fullW, 0.02, 0.02), shelfNeonMat);
   shelfNeon.position.set(0, surfaceY + SHELF_THICKNESS + 0.01, SHELF_NEUTRAL_Z + SHELF_DEPTH / 2 + 0.02);
   shelfGroup.add(shelfNeon);
+
+  // A compact row of animated arcade pixels makes the moving shelf readable
+  // through the glass without adding a texture or a post-processing pass.
+  const shelfBulbs = [];
+  const bulbColors = [0xff4fd8, 0x39f7ff, 0xffd84d, 0x7b61ff];
+  for (let i = 0; i < 16; i++) {
+    const bulbMat = new THREE.MeshBasicMaterial({ color: bulbColors[i % bulbColors.length], transparent: true, opacity: 0.8 });
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), bulbMat);
+    bulb.position.set(-fullW / 2 + 0.18 + i * (fullW - 0.36) / 15, surfaceY + SHELF_THICKNESS + 0.035, SHELF_NEUTRAL_Z + SHELF_DEPTH / 2 + 0.035);
+    shelfGroup.add(bulb);
+    shelfBulbs.push({ mesh: bulb, phase: i * 0.55 });
+  }
 
   group.add(shelfGroup);
 
@@ -398,6 +410,9 @@ export function createPlatform(scene) {
     sideColumns,
     frameGoldMat,
     marquee,
+    shelfNeonMat,
+    shelfBulbs,
+    zoneLeds,
   };
 
   // === CABINET SIDE PANELS (thick, styled like real arcade machine sides) ===
@@ -561,6 +576,7 @@ export function createPlatform(scene) {
     const led = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.05, 0.03, 0.03), zoneLedMat[zone.type]);
     led.position.set(zone.centerX, chuteY0 + 0.05, chuteStartZ - 0.03);
     group.add(led);
+    zoneLeds.push({ mesh: led, type: zone.type, phase: zone.centerX * 0.7 });
   });
 
   // === SLOPE: coins slide downhill from shelf front to win/holes ===
@@ -667,6 +683,24 @@ export function createPlatform(scene) {
       // Neon gold frame pulses (slow sine)
       if (wallAnims.frameGoldMat) {
         wallAnims.frameGoldMat.emissiveIntensity = 1.6 + 1.0 * Math.sin(time * 0.9);
+      }
+      if (wallAnims.shelfNeonMat) {
+        wallAnims.shelfNeonMat.emissiveIntensity = 1.25 + 0.8 * (0.5 + 0.5 * Math.sin(time * 2.2));
+      }
+      if (wallAnims.shelfBulbs) {
+        for (const bulb of wallAnims.shelfBulbs) {
+          const chase = 0.5 + 0.5 * Math.sin(time * 4.5 - bulb.phase);
+          bulb.mesh.material.opacity = 0.3 + chase * 0.7;
+          bulb.mesh.scale.setScalar(0.8 + chase * 0.5);
+        }
+      }
+      if (wallAnims.zoneLeds) {
+        for (const led of wallAnims.zoneLeds) {
+          const pulseLed = 0.5 + 0.5 * Math.sin(time * 2.6 + led.phase);
+          led.mesh.material.emissiveIntensity = led.type === 'win'
+            ? 2.1 + pulseLed * 1.5
+            : 1.7 + pulseLed * 1.1;
+        }
       }
     }
   }
