@@ -1,6 +1,17 @@
 # Coin Pusher 3D - Casino Edition
 
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-PLAY%20NOW-ffd700?style=for-the-badge&logo=github&logoColor=black)](https://maxime-fleury.github.io/CoinU/)
+
 A browser-based 3D coin pusher game built with **Three.js** and **Bun**.
+
+## 🎮 Live Demo
+
+Play the latest build on GitHub Pages:
+
+**[https://maxime-fleury.github.io/CoinU/](https://maxime-fleury.github.io/CoinU/)**
+
+The site is rebuilt and redeployed automatically on every push to `main` by the
+[GitHub Actions workflow](.github/workflows/deploy.yml).
 
 ## Features
 
@@ -48,7 +59,7 @@ bun run start
 ## Controls
 
 - **SPACE** or click the drop button to drop a coin/bill
-- **1-8** to buy upgrades
+- **1-9, 0** to buy upgrades
 - Switch between Coins and Dollars with the toggle buttons
 - Use the Shop / Prestige tabs to manage upgrades
 
