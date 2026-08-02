@@ -8,8 +8,11 @@ node_modules
 
 # output
 out
-dist
 *.tgz
+
+# dist/main.js is committed on purpose: the GitHub Pages site is served from
+# the repository branch (index.html hard-references dist/main.js), so the
+# bundle must be part of the repo for the live demo to work.
 
 # code coverage
 coverage
