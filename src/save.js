@@ -48,7 +48,10 @@ export function loadGame() {
     const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (typeof data.coins !== 'number' || typeof data.totalEarned !== 'number') {
+    // JSON can contain `null`, strings, or non-finite numeric values from a
+    // corrupted/edited local save. Reject those before they can poison the
+    // game state with NaN and disable the economy or HUD.
+    if (!data || !Number.isFinite(data.coins) || !Number.isFinite(data.totalEarned)) {
       return null;
     }
     return data;

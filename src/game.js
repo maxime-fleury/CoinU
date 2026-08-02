@@ -4,17 +4,31 @@ import { UPGRADES, getUpgradeCost, getEffectValue } from './upgrades.js';
 import { PRESTIGE_UPGRADES, calculatePrestigePoints, getPrestigeStats, getPrestigeCost, getPrestigeEffect } from './prestige.js';
 import { loadGame, saveGame } from './save.js';
 
+function finiteOr(value, fallback = 0) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function sanitizeLevels(raw, definitions) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const levels = {};
+  for (const definition of definitions) {
+    const level = Math.floor(finiteOr(source[definition.id], 0));
+    levels[definition.id] = Math.max(0, Math.min(definition.maxLevel, level));
+  }
+  return levels;
+}
+
 export function createGameState() {
   const saved = loadGame();
 
   // Prestige data persists across resets
-  const prestigePoints = saved?.prestigePoints || 0;
-  const prestigeUpgrades = saved?.prestigeUpgrades || {};
+  const prestigePoints = Math.max(0, finiteOr(saved?.prestigePoints));
+  const prestigeUpgrades = sanitizeLevels(saved?.prestigeUpgrades, PRESTIGE_UPGRADES);
 
   const pStats = getPrestigeStats({ prestigePoints, prestigeUpgrades });
 
   // Calculate maxCoins from upgrades first (needed for proper coin capping)
-  const savedUpgrades = saved?.upgrades || {};
+  const savedUpgrades = sanitizeLevels(saved?.upgrades, UPGRADES);
   const maxCoinsLevel = savedUpgrades.maxCoins || 0;
   const rawMaxCoins = getEffectValue(UPGRADES[4], maxCoinsLevel);
   const maxCoins = Math.floor(rawMaxCoins * pStats.soulMultiplier);
@@ -36,11 +50,11 @@ export function createGameState() {
     _regenInitialized: false,
     isGameOver: false,
     gameTime: 0,
-    activeCurrency: saved?.activeCurrency || 'coins',
+    activeCurrency: saved?.activeCurrency === 'dollars' ? 'dollars' : 'coins',
     autoDropEnabled: saved?.autoDropEnabled ?? false,
     prestigePoints,
     prestigeUpgrades: { ...prestigeUpgrades },
-    collectedCards: saved?.collectedCards || [],
+    collectedCards: Array.isArray(saved?.collectedCards) ? [...saved.collectedCards] : [],
     // Lifetime records survive prestige resets.
     peakCoins: 0,
     peakDollars: 0,
@@ -53,39 +67,43 @@ export function createGameState() {
 
   if (saved) {
     // Load saved data with safe defaults
-    state.totalEarned = typeof saved.totalEarned === 'number' ? saved.totalEarned : 0;
-    state.totalEarnedLifetime = typeof saved.totalEarnedLifetime === 'number'
-      ? saved.totalEarnedLifetime
-      : state.totalEarned;
-    state.totalDropped = typeof saved.totalDropped === 'number' ? saved.totalDropped : 0;
-    state.totalDollarsEarned = typeof saved.totalDollarsEarned === 'number' ? saved.totalDollarsEarned : 0;
+    state.totalEarned = Math.max(0, finiteOr(saved.totalEarned));
+    state.totalEarnedLifetime = Math.max(0, finiteOr(saved.totalEarnedLifetime, state.totalEarned));
+    state.totalDropped = Math.max(0, finiteOr(saved.totalDropped));
+    state.totalDollarsEarned = Math.max(0, finiteOr(saved.totalDollarsEarned));
     state.upgrades = savedUpgrades;
-    state.maxDollars = Math.max(10, saved.maxDollars || 0);
+    const savedMaxDollars = Math.max(0, finiteOr(saved.maxDollars));
+    state.maxDollars = Math.max(10, pStats.voidStartingDollars || 0, savedMaxDollars);
 
-    // Load coins with cap - GUARANTEED minimum 80 coins
-    const loadCoins = typeof saved.coins === 'number' ? saved.coins : 80;
-    state.coins = Math.min(Math.max(loadCoins, 80), state.maxCoins);
+    // Preserve legitimate zero balances. A previous minimum of 80 coins / 10
+    // dollars resurrected bankrupt runs after reload and bypassed the regen
+    // flow entirely.
+    const loadCoins = Number.isFinite(saved.coins) ? saved.coins : 0;
+    state.coins = Math.min(Math.max(loadCoins, 0), state.maxCoins);
 
-    // Load dollars - GUARANTEED minimum 10 dollars
-    const loadDollars = typeof saved.dollars === 'number' ? saved.dollars : 0;
-    state.dollars = Math.min(Math.max(loadDollars, 10), state.maxDollars);
+    const loadDollars = Number.isFinite(saved.dollars) ? saved.dollars : 0;
+    state.dollars = Math.min(Math.max(loadDollars, 0), state.maxDollars);
 
     // Restore transient gameplay state so a reload doesn't wipe progress.
     // (dropCount, lastDropTime, regenCooldown, isGameOver)
-    if (typeof saved.dropCount === 'number') state.dropCount = saved.dropCount;
-    if (typeof saved.lastDropTime === 'number') state.lastDropTime = saved.lastDropTime;
-    if (typeof saved.regenCooldown === 'number') state.regenCooldown = saved.regenCooldown;
+    if (Number.isFinite(saved.dropCount)) state.dropCount = Math.max(0, Math.floor(saved.dropCount));
+    if (Number.isFinite(saved.lastDropTime)) state.lastDropTime = Math.max(0, saved.lastDropTime);
+    if (Number.isFinite(saved.regenCooldown)) state.regenCooldown = Math.max(0, saved.regenCooldown);
     if (typeof saved.isGameOver === 'boolean') state.isGameOver = saved.isGameOver;
+    // Preserve an in-progress or completed empty-wallet cooldown across a
+    // reload. Without this marker updateGame treated every loaded zero balance
+    // as a fresh bankruptcy and restarted the full timer.
+    if (state.coins <= 0 && state.dollars <= 0) state._regenInitialized = true;
 
     // Restore lifetime records + progression trackers (these survive prestige).
-    if (typeof saved.peakCoins === 'number') state.peakCoins = saved.peakCoins;
-    if (typeof saved.peakDollars === 'number') state.peakDollars = saved.peakDollars;
-    if (typeof saved.peakCombo === 'number') state.peakCombo = saved.peakCombo;
-    if (typeof saved.bestWinStreak === 'number') state.bestWinStreak = saved.bestWinStreak;
-    if (typeof saved.winStreak === 'number') state.winStreak = saved.winStreak;
+    if (Number.isFinite(saved.peakCoins)) state.peakCoins = Math.max(0, saved.peakCoins);
+    if (Number.isFinite(saved.peakDollars)) state.peakDollars = Math.max(0, saved.peakDollars);
+    if (Number.isFinite(saved.peakCombo)) state.peakCombo = Math.max(0, Math.floor(saved.peakCombo));
+    if (Number.isFinite(saved.bestWinStreak)) state.bestWinStreak = Math.max(0, Math.floor(saved.bestWinStreak));
+    if (Number.isFinite(saved.winStreak)) state.winStreak = Math.max(0, Math.floor(saved.winStreak));
     if (Array.isArray(saved.milestonesHit)) state.milestonesHit = saved.milestonesHit;
-    if (typeof saved.jackpotsHit === 'number') state.jackpotsHit = saved.jackpotsHit;
-    if (typeof saved.gameTime === 'number') state.gameTime = saved.gameTime;
+    if (Number.isFinite(saved.jackpotsHit)) state.jackpotsHit = Math.max(0, Math.floor(saved.jackpotsHit));
+    if (Number.isFinite(saved.gameTime)) state.gameTime = Math.max(0, saved.gameTime);
   } else {
     // Fresh game: start with 80 coins, maxCoins=100, dollars=10
     state.coins = 80;
@@ -282,6 +300,11 @@ export function buyUpgrade(state, upgradeId, maxLevels = 1) {
     return { success: false, reason: lastReason || 'not_enough_coins' };
   }
 
+  // Upgrade levels mutate the existing object. Clear the memoized stats before
+  // recomputing so push power, capacity, auto-drop, and other effects apply
+  // immediately instead of remaining stuck at the first frame's values.
+  state._cachedStats = null;
+  state._cachedStatsKey = undefined;
   const stats = getEffectiveStats(state);
   state.maxCoins = stats.maxCoins;
   saveGame(state);
@@ -309,6 +332,10 @@ export function buyPrestigeUpgrade(state, upgradeId) {
 
   state.prestigePoints -= cost;
   state.prestigeUpgrades[upgradeId] = (state.prestigeUpgrades[upgradeId] || 0) + 1;
+  // Prestige upgrades mutate the existing object, so invalidate the cached
+  // effective stats explicitly rather than waiting for a reference change.
+  state._cachedStats = null;
+  state._cachedStatsKey = undefined;
 
   saveGame(state);
   return { success: true, newLevel: state.prestigeUpgrades[upgradeId] };
@@ -329,7 +356,10 @@ export function performPrestige(state) {
   const earned = state.totalEarnedLifetime || state.totalEarned;
   const dEarned = state.totalDollarsEarned || 0;
   const boostLevel = state.upgrades.prestigeBoost || 0;
-  const boostMultiplier = boostLevel > 0 ? getEffectValue(UPGRADES[7], boostLevel) : 1;
+  const prestigeBoostUpgrade = UPGRADES.find(upgrade => upgrade.id === 'prestigeBoost');
+  const boostMultiplier = boostLevel > 0 && prestigeBoostUpgrade
+    ? getEffectValue(prestigeBoostUpgrade, boostLevel)
+    : 1;
   const rawPoints = calculatePrestigePoints(earned, dEarned);
   const newPoints = Math.floor(rawPoints * boostMultiplier);
 

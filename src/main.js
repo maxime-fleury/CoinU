@@ -308,6 +308,20 @@ function updatePeaks(state) {
   if (state.dropCount > (state.peakCombo || 0)) state.peakCombo = state.dropCount;
 }
 
+// Credit only what fits in the wallet. Previously jackpot, milestone, and
+// card bonuses could increase lifetime earnings by their full amount even when
+// the coin cap rejected them, granting prestige progress for coins the player
+// never actually received.
+function creditCoins(state, amount) {
+  const requested = Math.max(0, Number.isFinite(amount) ? amount : 0);
+  const available = Math.max(0, state.maxCoins - state.coins);
+  const credited = Math.min(requested, available);
+  state.coins += credited;
+  state.totalEarned += credited;
+  state.totalEarnedLifetime = (state.totalEarnedLifetime || 0) + credited;
+  return credited;
+}
+
 function animate(time) {
   requestAnimationFrame(animate);
 
@@ -372,11 +386,8 @@ function animate(time) {
         ui.showZoneFeedback('×2 GOLDEN!', 'win', window.innerWidth / 2, window.innerHeight / 2 + 120);
       }
       const effectiveWin = baseWin * goldenMultiplier;
-      const coinsToAdd = Math.min(effectiveWin, gameState.maxCoins - gameState.coins);
-      const wasted = effectiveWin - Math.max(0, coinsToAdd);
-      gameState.coins += Math.max(0, coinsToAdd);
-      gameState.totalEarned += Math.max(0, coinsToAdd);
-      gameState.totalEarnedLifetime = (gameState.totalEarnedLifetime || 0) + Math.max(0, coinsToAdd);
+      const coinsToAdd = creditCoins(gameState, effectiveWin);
+      const wasted = Math.max(0, effectiveWin - coinsToAdd);
 
       // Dollar bills that land in WIN give actual dollars back
       if (winDollars > 0) {
@@ -423,17 +434,19 @@ function animate(time) {
       if (coinsToAdd > 0 && Math.random() < jackpotChance) {
         const tierRoll = Math.random();
         const jackpotBonus = tierRoll < 0.7 ? 25 : (tierRoll < 0.95 ? 50 : 100);
-        ui.showJackpot(jackpotBonus);
-        ui.screenShake(2);
-        pulseEvent('jackpot');
-        playSound('jackpot');
-        ui.showCoinRain(35); // Extra coin rain celebration
-        // Extra bonus particles and a screen flash for the celebration.
-        particleSystem.emit(0, platform.height + 0.6, platform.frontDropZ + 0.5, 60);
-        gameState.coins = Math.min(gameState.coins + jackpotBonus, gameState.maxCoins);
-        gameState.totalEarned += jackpotBonus;
-        gameState.totalEarnedLifetime = (gameState.totalEarnedLifetime || gameState.totalEarned) + jackpotBonus;
-        gameState.jackpotsHit = (gameState.jackpotsHit || 0) + 1;
+        // Credit first so a full wallet cannot show a jackpot that awarded
+        // nothing. Display the amount that actually fit, not a phantom bonus.
+        const jackpotCredited = creditCoins(gameState, jackpotBonus);
+        if (jackpotCredited > 0) {
+          ui.showJackpot(jackpotCredited);
+          ui.screenShake(2);
+          pulseEvent('jackpot');
+          playSound('jackpot');
+          ui.showCoinRain(35); // Extra coin rain celebration
+          // Extra bonus particles and a screen flash for the celebration.
+          particleSystem.emit(0, platform.height + 0.6, platform.frontDropZ + 0.5, 60);
+          gameState.jackpotsHit = (gameState.jackpotsHit || 0) + 1;
+        }
       }
 
       // --- MILESTONE detection ---
@@ -447,11 +460,7 @@ function animate(time) {
         if (!m) break;
         gameState.milestonesHit.push(m.value);
         const milestoneBonus = Math.floor(m.value * 0.05);
-        if (milestoneBonus > 0) {
-          gameState.coins = Math.min(gameState.coins + milestoneBonus, gameState.maxCoins);
-          gameState.totalEarned += milestoneBonus;
-          gameState.totalEarnedLifetime = (gameState.totalEarnedLifetime || gameState.totalEarned) + milestoneBonus;
-        }
+        if (milestoneBonus > 0) creditCoins(gameState, milestoneBonus);
         ui.showMilestone(m, milestoneBonus);
         ui.showCoinRain(15); // Coin rain on milestone
         particleSystem.emit(0, platform.height + 0.5, platform.frontDropZ + 0.4, 25);
@@ -464,13 +473,10 @@ function animate(time) {
           if (!gameState.collectedCards.includes(cardId)) {
             gameState.collectedCards.push(cardId);
             ui.showNotification('\uD83C\uDCCF ' + t('cardCollected') + gameState.collectedCards.length, 'prestige');
-            const cardBonus = 10;
-            gameState.coins = Math.min(gameState.coins + cardBonus, gameState.maxCoins);
-            gameState.totalEarned += cardBonus;
-            // Card bonus should count toward lifetime prestige progress
-            // (previously only totalEarned was bumped, undercounting prestige).
-            gameState.totalEarnedLifetime =
-              (gameState.totalEarnedLifetime || gameState.totalEarned) + cardBonus;
+            // Card bonus counts toward lifetime prestige progress only when
+            // it actually fits in the wallet; capped rewards are not phantom
+            // earnings.
+            creditCoins(gameState, 10);
           }
         });
       }
