@@ -377,6 +377,13 @@ function animate(time) {
       // Gold particles (at center front)
       particleSystem.emit(0, platform.height + 0.3, platform.frontDropZ + 0.3,
         (winCoins + winDollars + fallen.win.cards.length) * 5);
+
+      // Visible reward: spawn coins that tumble down the chute and pile up in
+      // the glass-fronted tray — the player SEES the coins they just won.
+      const wonVisual = winCoins + winDollars + fallen.win.cards.length;
+      if (wonVisual > 0) {
+        objectSystem.spawnWinCoins(wonVisual, platform.leftX + 1.0, platform.rightX - 1.0);
+      }
       
       if (coinsToAdd > 0) {
         ui.showNotification('\uD83C\uDF89 +' + coinsToAdd + ' ' + t('coinsEarned'), 'success');

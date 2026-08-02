@@ -229,7 +229,8 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
   }
 
   function makeCardMesh(x, z) {
-    const y = platform.surfaceY + CARD_T / 2 + 0.01;
+    // Cards float above the pusher plate (which sits at shelfSurfaceY).
+    const y = platform.shelfSurfaceY + 0.10;
     const mat = mats.card[Math.floor(Math.random() * 4)];
     const m = new THREE.Mesh(cardGeo, mat);
     m.position.set(x, y, z);
@@ -321,15 +322,18 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
   }
 
   function spawnCoinStacks(count) {
+    // Towers sit ON the pusher plate so they visibly ride it and get shoved
+    // forward by the oscillation — the classic "pile being pushed" look.
     for (let i = 0; i < count; i++) {
-      const cx = platform.leftX + 0.8 + Math.random() * (platform.rightX - platform.leftX - 1.6);
-      const cz = platform.backZ + 0.5 + Math.random() * (platform.frontDropZ - platform.backZ - 2.0);
+      const cx = platform.leftX + 1.2 + Math.random() * (platform.rightX - platform.leftX - 2.4);
+      const cz = platform.shelfBackZ + 0.6 + Math.random() * (platform.shelfDepth - 1.8);
       const height = 6 + Math.floor(Math.random() * 6);
       for (let j = 0; j < height; j++) {
         const leanX = Math.sin(j * 0.3) * 0.006;
         const leanZ = Math.cos(j * 0.4) * 0.006;
-        const y = platform.surfaceY + CT / 2 + j * (CT + 0.001);
+        const y = platform.shelfSurfaceY + CT / 2 + j * (CT + 0.001);
         const obj = spawn('coin', cx + leanX, cz + leanZ, y, 'sliding');
+        obj.onShelf = true;
         obj.vy = 0;
       }
     }
@@ -440,7 +444,13 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
   }
 
   function resolveVertical() {
-    // Build spatial grid for sliding/floating objects only
+    // Raise-only support pass: for each sliding coin, find the highest surface
+    // BELOW it (the platform rest height, or the top of any overlapping coin)
+    // and raise it to rest there. Coins are never pushed downward — that was
+    // the bug that left stacked coins half-sunk into each other (and the
+    // symmetric push could drive a coin into the platform).
+    //
+    // Build spatial grid for sliding objects only
     const vGrid = new Map();
     for (let i = 0; i < objects.length; i++) {
       const o = objects[i];
@@ -453,68 +463,44 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
       cell.push(o);
     }
 
-    const vChecked = new Set();
-    for (let i = 0; i < objects.length; i++) {
-      const a = objects[i];
-      if (a.type === 'card' || a.state === 'falling' || a.state === 'dropping') continue;
+    // Two passes so multi-coin towers converge even when several coins share
+    // one footprint (top coin rests on middle, middle on bottom, bottom on
+    // the platform).
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < objects.length; i++) {
+        const a = objects[i];
+        if (a.type === 'card' || a.state === 'falling' || a.state === 'dropping') continue;
+        const ah = halfH(a.type);
+        const aR = radiusOf(a.type);
 
-      const ah = halfH(a.type);
-      const cx = Math.floor(a.x / GRID_CELL);
-      const cz = Math.floor(a.z / GRID_CELL);
-
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dz = -1; dz <= 1; dz++) {
-          const cell = vGrid.get(gridKey(cx + dx, cz + dz));
-          if (!cell) continue;
-          for (let k = 0; k < cell.length; k++) {
-            const b = cell[k];
-            if (b === a) continue;
-            const pairKey = i < objects.indexOf(b) ? `${i}:${objects.indexOf(b)}` : `${objects.indexOf(b)}:${i}`;
-            if (vChecked.has(pairKey)) continue;
-            vChecked.add(pairKey);
-
-            const bR = radiusOf(b.type);
-            const aR = radiusOf(a.type);
-            const dx2 = b.x - a.x, dz2 = b.z - a.z;
-            const distXZ = Math.sqrt(dx2 * dx2 + dz2 * dz2);
-            if (distXZ > aR + bR + 0.01) continue;
-
-            const bh = halfH(b.type);
-            const bBottom = b.y - bh;
-            const aTop = a.y + ah;
-            const bTop = b.y + bh;
-            const aBottom = a.y - ah;
-
-            if (aTop > bBottom + 0.002 && aBottom < bBottom && aBottom > bBottom - CT * 2) {
-              const targetY = bBottom - ah;
-              if (a.y > targetY + 0.001) {
-                a.y = targetY;
-                if (a.vy > 0) a.vy = 0;
-              }
-            }
-
-            if (bTop > aBottom + 0.002 && bBottom < aBottom && bBottom > aBottom - CT * 2) {
-              const targetY = aBottom - bh;
-              if (b.y > targetY + 0.001) {
-                b.y = targetY;
-                if (b.vy > 0) b.vy = 0;
-              }
-            }
-
-            if (distXZ < aR + bR) {
-              const yOverlap = (ah + bh) - Math.abs(a.y - b.y);
-              if (yOverlap > 0.001 && Math.abs(a.y - b.y) < ah + bh) {
-                const pushY = yOverlap * 0.5;
-                if (a.y < b.y) {
-                  a.y -= pushY * 0.5;
-                  b.y += pushY * 0.5;
-                } else {
-                  a.y += pushY * 0.5;
-                  b.y -= pushY * 0.5;
-                }
+        // Start from the platform rest height at (a.x, a.z)
+        let supportY = restHeight(a) - ah;
+        const cx = Math.floor(a.x / GRID_CELL);
+        const cz = Math.floor(a.z / GRID_CELL);
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const cell = vGrid.get(gridKey(cx + dx, cz + dz));
+            if (!cell) continue;
+            for (let k = 0; k < cell.length; k++) {
+              const b = cell[k];
+              if (b === a) continue;
+              const bR = radiusOf(b.type);
+              const dx2 = b.x - a.x, dz2 = b.z - a.z;
+              const distXZ = Math.sqrt(dx2 * dx2 + dz2 * dz2);
+              if (distXZ > aR + bR * 0.95) continue;
+              const bh = halfH(b.type);
+              const bTop = b.y + bh;
+              // b supports a only when b's top is at/below a's bottom.
+              if (bTop < a.y - ah + 0.02 && bTop > supportY) {
+                supportY = bTop;
               }
             }
           }
+        }
+        const minY = supportY + ah;
+        if (a.y < minY - 0.001) {
+          a.y = minY;
+          if (a.vy < 0) a.vy = 0;
         }
       }
     }
@@ -558,6 +544,19 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
         const distToFront = pushFront - o.z;
         const influence = Math.max(0, 1 - distToFront / 2.0);
         o.vz += pushStrength * influence * subDt;
+      }
+      // Face clamp: when the shelf advances, any field coin it would sweep
+      // through is held just ahead of its front face — the plate pushes coins,
+      // it never runs over them (that was the "coins inside the platform").
+      // The nudge is delta-based (max = shelf movement this substep * 2), so
+      // coins slide forward at shelf speed instead of teleporting.
+      if (platform.shelfVelocity > 0) {
+        const faceZ = platform.shelfFrontZ;
+        const minZ = faceZ + radiusOf(o.type) + 0.02;
+        if (o.z < minZ && o.z > faceZ - 0.35) {
+          o.z += Math.min(minZ - o.z, platform.shelfVelocity * subDt * 2);
+          if (o.vz < 0.2) o.vz = 0.2;
+        }
       }
     }
   }
@@ -709,15 +708,10 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
         }
 
         if (o.state === 'sliding') {
-          if (!o.onShelf && o.type !== 'card') {
-            const r = radiusOf(o.type);
-            const underShelfX = o.x > platform.leftX + r && o.x < platform.rightX - r;
-            const underShelfZ = o.z > platform.shelfBackZ + r && o.z < platform.shelfFrontZ - r;
-            if (underShelfX && underShelfZ) {
-              o.onShelf = true;
-              o.y = platform.shelfSurfaceY + halfH(o.type);
-            }
-          }
+          // NOTE: no "scoop" here anymore — field coins are never teleported
+          // onto the moving shelf (that made coins ride the platform / poke
+          // through it). Field coins get shoved forward by applyShelfPush's
+          // face clamp, like a real pusher plate pushing the pile.
 
           if (o.onShelf) {
             const inSlotX = Math.abs(o.x) < platform.slotHalfWidth;
@@ -777,8 +771,9 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
             if (o.vz < 0.5) o.vz = 0.5;
           }
 
-          // Slope: only apply if close to the surface
-          if (!o.onShelf && o.z > platform.shelfFrontZ + radiusOf(o.type) && o.z < platform.frontDropZ) {
+          // Slope: only on the actual descending ramp (not under the shelf),
+          // and only if the coin is close to the surface.
+          if (!o.onShelf && o.z > platform.slopeStartZ + radiusOf(o.type) * 0.5 && o.z < platform.frontDropZ) {
             const surfaceDist = Math.abs(o.y - (platform.surfaceY + halfH(o.type)));
             if (surfaceDist < 0.15) {
               const slopeT = Math.max(0, Math.min(1, (o.z - platform.slopeStartZ) / (platform.slopeEndZ - platform.slopeStartZ)));
@@ -828,9 +823,8 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
       const o = objects[i];
       if (o.type === 'card' || o.state === 'floating') {
         o.z += o.vz * dt;
-        // Hover above the shelf top so the moving shelf doesn't clip through
-        // the card as it oscillates underneath.
-        o.y = platform.shelfSurfaceY + CARD_T / 2 + 0.02 + Math.sin(now * 0.001 + o.x) * 0.01;
+        // Hover above the pusher plate so the moving shelf never clips it.
+        o.y = platform.shelfSurfaceY + 0.12 + Math.sin(now * 0.001 + o.x) * 0.01;
         o.mesh.rotation.y += dt * 0.5;
         o.mesh.position.set(o.x, o.y, o.z);
         continue;
@@ -865,6 +859,7 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
     }
 
     maintainCount(time);
+    updateWinCoins(dt);
   }
 
   function maintainCount(time) {
@@ -890,7 +885,88 @@ export function createObjectSystem(scene, platform, existingCardCount = 0) {
     }
   }
 
+  // ================================================================
+  // WON-COIN TRAY — the "feeling of winning" effect.
+  // Every WIN spawns a few small coin meshes that visibly tumble down the
+  // front chute and pile up in the glass-fronted tray. Purely decorative:
+  // they don't join the physics pool, and the pile is capped so memory is
+  // bounded.
+  // ================================================================
+  const WIN_CAP = 36;
+  const wonGeo = new THREE.CylinderGeometry(0.19, 0.19, 0.04, 20);
+  const wonCoins = [];
+  // Height of the chute floor at a given z (matches the front chute mesh
+  // built in platform.js: 0.32 at the drop edge → 0.10 at the tray).
+  const chuteFloorY = (z) => 0.32 - Math.max(0, z - platform.frontDropZ) * 0.122;
+
+  function spawnWinCoins(count, minX, maxX) {
+    const n = Math.max(0, Math.min(Math.floor(count || 0), 12));
+    for (let i = 0; i < n; i++) {
+      if (wonCoins.length >= WIN_CAP) {
+        const oldest = wonCoins.shift();
+        group.remove(oldest.mesh);
+      }
+      const mesh = new THREE.Mesh(wonGeo, mats.coin[Math.floor(Math.random() * 3)]);
+      mesh.castShadow = true;
+      group.add(mesh);
+      const z1 = platform.frontDropZ + 1.6 + Math.random() * 0.5; // into the tray
+      wonCoins.push({
+        mesh,
+        t: 0,
+        dur: 1.0 + Math.random() * 0.5,
+        x0: minX + Math.random() * (maxX - minX),
+        y0: 1.3 + Math.random() * 0.25,
+        z0: platform.frontDropZ + 0.08,
+        x1: Math.max(-3.0, Math.min(3.0, (Math.random() - 0.5) * 5.2)),
+        z1,
+        settleY: chuteFloorY(z1) + 0.03 + Math.random() * 0.07,
+        spin: 6 + Math.random() * 8,
+        phase: Math.random() * Math.PI * 2,
+        settled: false,
+      });
+    }
+  }
+
+  function updateWinCoins(dt) {
+    for (let i = wonCoins.length - 1; i >= 0; i--) {
+      const w = wonCoins[i];
+      w.t += dt;
+      const p = Math.min(1, w.t / w.dur);
+      if (w.settled) {
+        // Idle in the pile — a gentle bob so the tray feels alive.
+        w.mesh.position.set(w.x1, w.settleY + Math.sin(w.t * 1.4 + w.phase) * 0.004, w.z1);
+        w.mesh.rotation.y += dt * 0.2;
+        continue;
+      }
+      // Phase 1 (0–45%): parabolic drop from the edge down to the chute.
+      const pA = Math.min(1, p / 0.45);
+      const ca = { x: w.x0, y: w.y0 + 0.35, z: w.z0 };
+      const hit = { x: w.x0, y: chuteFloorY(w.z0 + 0.1) + 0.02, z: w.z0 + 0.1 };
+      const ia = 1 - pA;
+      const px = ia * ia * w.x0 + 2 * ia * pA * ca.x + pA * pA * hit.x;
+      const py = ia * ia * w.y0 + 2 * ia * pA * ca.y + pA * pA * hit.y;
+      const pz = ia * ia * w.z0 + 2 * ia * pA * ca.z + pA * pA * hit.z;
+      if (p < 0.45) {
+        w.mesh.position.set(px, Math.max(py, chuteFloorY(pz)), pz);
+      } else {
+        // Phase 2 (45–100%): tumble down the chute into the tray pile.
+        const pB = Math.min(1, (p - 0.45) / 0.55);
+        const cb = { x: (w.x0 + w.x1) / 2, y: chuteFloorY((w.z0 + w.z1) / 2) + 0.22, z: (w.z0 + w.z1) / 2 };
+        const ib = 1 - pB;
+        const sx = ib * ib * hit.x + 2 * ib * pB * cb.x + pB * pB * w.x1;
+        const sy = ib * ib * hit.y + 2 * ib * pB * cb.y + pB * pB * w.settleY;
+        const sz = ib * ib * hit.z + 2 * ib * pB * cb.z + pB * pB * w.z1;
+        w.mesh.position.set(sx, Math.max(sy, chuteFloorY(sz) - 0.01), sz);
+        if (p >= 1) w.settled = true;
+      }
+      // Tumble while falling.
+      w.mesh.rotation.x += dt * w.spin * 0.7;
+      w.mesh.rotation.z += dt * w.spin;
+    }
+  }
+
   return {
     initObjects, dropObject, collectFallen, update, clearObjects, group,
+    spawnWinCoins,
   };
 }

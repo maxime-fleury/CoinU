@@ -60,7 +60,9 @@ export function createPlatform(scene) {
   const SHELF_TOP = surfaceY + SHELF_THICKNESS;
   const SLOT_CENTER_Z = -1.5;
   const SLOT_DEPTH = 0.45;
-  const SLOT_WIDTH = 0.5;
+  // Wide enough (0.7) that a coin (0.56 diameter) drops cleanly through the
+  // slot gap instead of clipping the shelf slabs on the way down.
+  const SLOT_WIDTH = 0.7;
   const SLOT_BACK_Z = SLOT_CENTER_Z - SLOT_DEPTH / 2;
   const SLOT_FRONT_Z = SLOT_CENTER_Z + SLOT_DEPTH / 2;
   const SHELF_FRONT_EDGE_Z = SHELF_NEUTRAL_Z + SHELF_DEPTH / 2;
@@ -437,7 +439,8 @@ export function createPlatform(scene) {
     side: THREE.DoubleSide, depthWrite: false,
   });
   const frontGlass = new THREE.Mesh(new THREE.BoxGeometry(W - 0.2, 2.2, 0.04), glassMat);
-  frontGlass.position.set(0, H + 1.8, D / 2 - 0.6);
+  // Glass sits at the drop edge so the chute + tray below stay fully visible.
+  frontGlass.position.set(0, H + 1.8, playFront - 0.1);
   frontGlass.renderOrder = 4;
   group.add(frontGlass);
 
@@ -450,7 +453,7 @@ export function createPlatform(scene) {
 
   // Glass frame trims (metal bars holding the glass in place)
   const frameMat = new THREE.MeshStandardMaterial({ color: 0x8877cc, roughness: 0.2, metalness: 0.8, emissive: 0x4433aa, emissiveIntensity: 0.1 });
-  [[-W / 2 - 0.15, D / 2 - 0.6], [W / 2 + 0.15, D / 2 - 0.6]].forEach(([fx, fz]) => {
+  [[-W / 2 - 0.15, playFront - 0.1], [W / 2 + 0.15, playFront - 0.1]].forEach(([fx, fz]) => {
     const f = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.3, 0.06), frameMat);
     f.position.set(fx, H + 1.8, fz); group.add(f);
   });
@@ -481,121 +484,84 @@ export function createPlatform(scene) {
     runningX += w;
   }
 
-  const winWellMat = new THREE.MeshStandardMaterial({ color: 0x003318, roughness: 0.7, metalness: 0.1, emissive: 0x00ff44, emissiveIntensity: 0.15 });
-  const winFillMat = new THREE.MeshStandardMaterial({ color: 0x00ff66, emissive: 0x00ff44, emissiveIntensity: 0.8, transparent: true, opacity: 0.35, side: THREE.DoubleSide });
-  const winTopMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff44, emissiveIntensity: 1.5, transparent: true, opacity: 0.5 });
-  const winLEDMat = new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff44, emissiveIntensity: 3.0 });
-  const winEdgeMat = new THREE.MeshStandardMaterial({ color: 0x00cc44, emissive: 0x00ff44, emissiveIntensity: 2.0, transparent: true, opacity: 0.7 });
-
-  zones.forEach(zone => {
-    if (zone.type !== 'win') return;
-    const well = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.04, 0.5, 1.2), winWellMat);
-    well.position.set(zone.centerX, H - 0.25, D / 2 - 0.4);
-    group.add(well);
-    const fill = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.06, 0.02, 1.18), winFillMat);
-    fill.position.set(zone.centerX, H - 0.08, D / 2 - 0.4);
-    group.add(fill);
-    const top = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.04, 0.008, 1.2), winTopMat);
-    top.position.set(zone.centerX, H - 0.065, D / 2 - 0.4);
-    group.add(top);
-    for (const side of [-1, 1]) {
-      const border = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.02, 0.04, 0.05), winEdgeMat);
-      border.position.set(zone.centerX, H + 0.03, D / 2 - 0.4 + side * 0.58);
-      group.add(border);
-    }
-    for (const side of [-1, 1]) {
-      const sideLed = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 1.2), winEdgeMat);
-      sideLed.position.set(zone.centerX + side * (zone.width / 2 - 0.02), H + 0.03, D / 2 - 0.4);
-      group.add(sideLed);
-    }
-    const innerMat = new THREE.MeshStandardMaterial({ color: 0x00ff44, emissive: 0x00ff22, emissiveIntensity: 0.4, transparent: true, opacity: 0.2 });
-    const inner = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.25, 0.35, 0.9), innerMat);
-    inner.position.set(zone.centerX, H - 0.15, D / 2 - 0.4);
-    group.add(inner);
-  });
-
-  const holeWellMat = new THREE.MeshStandardMaterial({ color: 0x0a0008, roughness: 1.0, metalness: 0.0, emissive: 0x330011, emissiveIntensity: 0.2 });
-  const holeFillMat = new THREE.MeshStandardMaterial({ color: 0xff0033, emissive: 0xff0022, emissiveIntensity: 0.6, transparent: true, opacity: 0.3, side: THREE.DoubleSide });
-  const holeTopMat = new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: 0xff0033, emissiveIntensity: 1.0, transparent: true, opacity: 0.4 });
-  const holeLEDMat = new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: 0xff0044, emissiveIntensity: 3.0 });
-  const holeEdgeMat = new THREE.MeshStandardMaterial({ color: 0xff0033, emissive: 0xff0022, emissiveIntensity: 2.0, transparent: true, opacity: 0.7 });
-
-  zones.forEach(zone => {
-    if (zone.type !== 'hole') return;
-    const well = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.04, 0.65, 1.2), holeWellMat);
-    well.position.set(zone.centerX, H - 0.325, D / 2 - 0.4);
-    group.add(well);
-    const fill = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.06, 0.02, 1.18), holeFillMat);
-    fill.position.set(zone.centerX, H - 0.08, D / 2 - 0.4);
-    group.add(fill);
-    const top = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.04, 0.008, 1.2), holeTopMat);
-    top.position.set(zone.centerX, H - 0.065, D / 2 - 0.4);
-    group.add(top);
-    for (const side of [-1, 1]) {
-      const border = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.02, 0.04, 0.05), holeEdgeMat);
-      border.position.set(zone.centerX, H + 0.03, D / 2 - 0.4 + side * 0.58);
-      group.add(border);
-    }
-    for (const side of [-1, 1]) {
-      const sideLed = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 1.2), holeEdgeMat);
-      sideLed.position.set(zone.centerX + side * (zone.width / 2 - 0.02), H + 0.03, D / 2 - 0.4);
-      group.add(sideLed);
-    }
-    const innerMat = new THREE.MeshStandardMaterial({ color: 0x440011, emissive: 0xff0022, emissiveIntensity: 0.15, transparent: true, opacity: 0.15 });
-    const inner = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.25, 0.45, 0.9), innerMat);
-    inner.position.set(zone.centerX, H - 0.225, D / 2 - 0.4);
-    group.add(inner);
-    const xMat = new THREE.MeshBasicMaterial({ color: 0xff0022, transparent: true, opacity: 0.2, side: THREE.DoubleSide });
-    const xBar1 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.003, 0.2), xMat);
-    xBar1.position.set(zone.centerX, H + 0.03, D / 2 - 0.4);
-    xBar1.rotation.y = Math.PI / 4;
-    group.add(xBar1);
-    const xBar2 = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.003, 0.2), xMat);
-    xBar2.position.set(zone.centerX, H + 0.03, D / 2 - 0.4);
-    xBar2.rotation.y = -Math.PI / 4;
-    group.add(xBar2);
-  });
-
-  // === COIN COLLECTION TRAY (real arcade-style tray at the bottom front) ===
-  const trayBodyMat = new THREE.MeshStandardMaterial({ color: 0x1a0835, roughness: 0.3, metalness: 0.7, emissive: 0x0a0420, emissiveIntensity: 0.12 });
-  const trayBody = new THREE.Mesh(new THREE.BoxGeometry(W + 0.8, 0.4, 1.0), trayBodyMat);
-  trayBody.position.set(0, H - 0.2, D / 2 + 0.3); trayBody.castShadow = true;
-  group.add(trayBody);
-
-  // Tray inner padding (felt-like material where coins collect)
-  const trayInnerMat = new THREE.MeshStandardMaterial({ color: 0x2a1040, roughness: 0.95, metalness: 0.02, emissive: 0x1a0a30, emissiveIntensity: 0.15 });
-  const trayInner = new THREE.Mesh(new THREE.BoxGeometry(W + 0.5, 0.02, 0.8), trayInnerMat);
-  trayInner.position.set(0, H - 0.01, D / 2 + 0.25);
-  group.add(trayInner);
-
-  // Tray lip (golden rim at the edge of the coin tray)
-  const trayLipMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.1, metalness: 0.9, emissive: 0x886600, emissiveIntensity: 0.3 });
-  const trayLip = new THREE.Mesh(new THREE.BoxGeometry(W + 0.6, 0.04, 0.08), trayLipMat);
-  trayLip.position.set(0, H + 0.03, D / 2 + 0.03);
-  group.add(trayLip);
-
-  // Angled chute face — the sloped panel between the playing field and the tray
-  // This is what makes the machine look like a real coin pusher.
+  // === FRONT CHUTE + COLLECTION TRAY (real coin-pusher front) ===
+  // No more boxy win/hole wells on the field. Coins pushed over the front edge
+  // drop onto a sloped chute and tumble into a glass-fronted tray. Every WIN
+  // also visibly spawns coins that fall and pile up in the tray (spawnWinCoins
+  // in coin.js) — the "feeling of winning". Zone LEDs on the drop edge keep
+  // the win/hole gameplay readable: green centre = WIN, red gutters = HOLE.
   const chuteMat = new THREE.MeshStandardMaterial({
-    color: 0x221144, roughness: 0.2, metalness: 0.8, emissive: 0x110833, emissiveIntensity: 0.3,
-    side: THREE.DoubleSide,
+    color: 0x1c0a38, roughness: 0.4, metalness: 0.6,
+    emissive: 0x0d0420, emissiveIntensity: 0.3, side: THREE.DoubleSide,
   });
-  const chuteW = W - 0.3;
-  const chuteH = 0.55;
-  const chuteD = 0.5;
-  const chuteAngle = 0.35; // ~20 degrees tilt
-  const chuteGeom = new THREE.BoxGeometry(chuteW, chuteH, chuteD);
-  const chute = new THREE.Mesh(chuteGeom, chuteMat);
-  chute.position.set(0, H + 0.18, D / 2 - 0.5);
-  chute.rotation.x = chuteAngle;
-  chute.castShadow = true; chute.receiveShadow = true;
-  group.add(chute);
+  const chuteSideMat = new THREE.MeshStandardMaterial({
+    color: 0x332266, roughness: 0.3, metalness: 0.8,
+    emissive: 0x1a0a30, emissiveIntensity: 0.25, side: THREE.DoubleSide,
+  });
+  const chuteGlassMat = new THREE.MeshPhysicalMaterial({
+    color: 0x99ccff, transparent: true, opacity: 0.12, roughness: 0.05,
+    metalness: 0.0, side: THREE.DoubleSide, depthWrite: false,
+  });
+  const chuteGoldMat = new THREE.MeshStandardMaterial({
+    color: 0xffd700, roughness: 0.15, metalness: 0.9,
+    emissive: 0x886600, emissiveIntensity: 0.35,
+  });
 
-  // Chute LED strips along the edges (gives the machine a "premium" look)
-  const chuteLEDMat = new THREE.MeshStandardMaterial({ color: 0xcc88ff, emissive: 0xaa44ff, emissiveIntensity: 2.0 });
-  const chuteLED = new THREE.Mesh(new THREE.BoxGeometry(chuteW - 0.1, 0.015, 0.015), chuteLEDMat);
-  chuteLED.position.set(0, H + 0.42, D / 2 - 0.58);
-  group.add(chuteLED);
+  const chuteStartZ = playFront;                  // 1.6 — the drop edge
+  const chuteEndZ = D / 2 + 0.40;                 // 3.40
+  // chuteY0 = surfaceY - SLOPE_DROP - 0.04, hardcoded because SLOPE_DROP is
+  // declared further down (const TDZ). Keep the 0.04 gap below the slope end
+  // in sync if SLOPE_DROP ever changes.
+  const chuteY0 = surfaceY - 0.22;                // ~0.32 top (below slope end)
+  const chuteY1 = H - 0.40;                       // ~0.10
+  const chuteLen = chuteEndZ - chuteStartZ;
+  const chuteTilt = Math.atan2(chuteY0 - chuteY1, chuteLen);
+  const chuteMidZ = (chuteStartZ + chuteEndZ) / 2;
+
+  // Sloped chute floor
+  const chuteFloor = new THREE.Mesh(new THREE.BoxGeometry(W - 0.5, 0.03, chuteLen), chuteMat);
+  chuteFloor.position.set(0, (chuteY0 + chuteY1) / 2, chuteMidZ);
+  chuteFloor.rotation.x = chuteTilt;
+  chuteFloor.receiveShadow = true;
+  group.add(chuteFloor);
+
+  // Glass side walls of the chute (coins visually funneled into the tray)
+  for (const side of [-1, 1]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.30, chuteLen), chuteGlassMat);
+    wall.position.set(side * (W - 0.5) / 2, (chuteY0 + chuteY1) / 2 + 0.10, chuteMidZ);
+    wall.rotation.x = chuteTilt;
+    group.add(wall);
+  }
+
+  // Collection tray at the bottom of the chute
+  const trayFloor = new THREE.Mesh(new THREE.BoxGeometry(W + 0.6, 0.04, 0.55), chuteMat);
+  trayFloor.position.set(0, chuteY1 - 0.02, chuteEndZ + 0.20);
+  trayFloor.receiveShadow = true;
+  group.add(trayFloor);
+  for (const side of [-1, 1]) {
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.55, 0.60), chuteGlassMat);
+    wall.position.set(side * (W + 0.6) / 2, chuteY1 + 0.26, chuteEndZ + 0.20);
+    group.add(wall);
+  }
+  // Front glass — you watch the won coins pile up through it.
+  const trayGlass = new THREE.Mesh(new THREE.BoxGeometry(W + 0.6, 0.55, 0.04), chuteGlassMat);
+  trayGlass.position.set(0, chuteY1 + 0.27, chuteEndZ + 0.50);
+  trayGlass.renderOrder = 5;
+  group.add(trayGlass);
+  const trayRim = new THREE.Mesh(new THREE.BoxGeometry(W + 0.64, 0.035, 0.05), chuteGoldMat);
+  trayRim.position.set(0, chuteY1 + 0.55, chuteEndZ + 0.50);
+  group.add(trayRim);
+
+  // Zone LEDs on the drop edge: green WIN centre, red HOLE gutters
+  const zoneLedMat = {
+    win: new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff44, emissiveIntensity: 2.6 }),
+    hole: new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: 0xff0022, emissiveIntensity: 2.6 }),
+  };
+  zones.forEach(zone => {
+    const led = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.05, 0.03, 0.03), zoneLedMat[zone.type]);
+    led.position.set(zone.centerX, chuteY0 + 0.05, chuteStartZ - 0.03);
+    group.add(led);
+  });
 
   // === SLOPE: coins slide downhill from shelf front to win/holes ===
   // Slope now runs all the way to the drop edge (was ending 0.4u short,
@@ -611,14 +577,9 @@ export function createPlatform(scene) {
   slopeMesh.receiveShadow = true;
   group.add(slopeMesh);
 
-  const slopeEdgeMat = new THREE.MeshStandardMaterial({ color: 0xcc88ff, emissive: 0xaa44ff, emissiveIntensity: 1.0 });
-  const slopeEdge = new THREE.Mesh(new THREE.BoxGeometry(W - 0.5, 0.03, 0.03), slopeEdgeMat);
-  slopeEdge.position.set(0, surfaceY + 0.01, SLOPE_START_Z);
-  group.add(slopeEdge);
-
-  const slopeEndEdge = new THREE.Mesh(new THREE.BoxGeometry(W - 0.5, 0.03, 0.03), slopeEdgeMat);
-  slopeEndEdge.position.set(0, surfaceY - SLOPE_DROP + 0.01, SLOPE_END_Z);
-  group.add(slopeEndEdge);
+  // (The magenta slope-edge strips were removed — the zone LEDs on the drop
+  // edge now carry the accent, and two parallel glowing lines looked like a
+  // bug rather than a rail.)
 
   // === CYAN LED STRIPS (under-shelf accent) ===
   const cyanMat = new THREE.MeshStandardMaterial({ color: 0x44eeff, emissive: 0x22ccff, emissiveIntensity: 1.2 });
