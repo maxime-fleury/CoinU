@@ -260,6 +260,7 @@ ui.refresh(gameState);
 
 // --- Neon flicker animation ---
 let neonTime = 0;
+let previousShelfVelocity = 0;
 
 // --- Game loop ---
 let lastTime = performance.now();
@@ -481,9 +482,9 @@ function animate(time) {
       particleSystem.emit(0, platform.height + 0.3, platform.frontDropZ + 0.3,
         (holeCoins + holeDollars + fallen.hole.cards.length) * 3);
       
-      if (holeCoins > 1) {
+      if (holeCoins > 0) {
         ui.showNotification('\uD83D\uDC80 ' + holeCoins + ' ' + t('coinsLost'), 'danger');
-        playSound('lose');
+        playSound('lose', Math.min(1.2, 0.7 + holeCoins * 0.12));
         ui.showZoneFeedback('-' + holeCoins, 'hole', window.innerWidth / 2 + (Math.random() - 0.5) * 100, window.innerHeight / 2 + 80);
         // Mild shake on heavy losses (3+ coins) — visual feedback without
         // matching JACKPOT intensity.
@@ -519,6 +520,14 @@ function animate(time) {
   }
 
   platform.updateMechanism(time / 1000);
+  // Give the cabinet a restrained mechanical clunk at the start of each
+  // forward push. It is throttled in audio.js, so the pusher feels physical
+  // without becoming a constant loop of noise.
+  const shelfVelocity = platform.shelfVelocity;
+  if (shelfVelocity > 0.65 && previousShelfVelocity <= 0.65) {
+    playSound('mechanism', Math.min(1.2, 0.7 + shelfVelocity * 0.18));
+  }
+  previousShelfVelocity = shelfVelocity;
   objectSystem.update(dt, time / 1000);
   particleSystem.update(dt);
   updateFlames(time / 1000);

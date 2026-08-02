@@ -18,6 +18,8 @@ export function createPlatform(scene) {
   // Declared before the wall animation registry because the animated zone
   // LEDs are created later in this function.
   const zoneLeds = [];
+  const zoneLaneStrips = [];
+  const zoneBadges = [];
 
   // === CABINET BASE ===
   // Real coin pusher machines have a solid cabinet with tapered/profiled sides.
@@ -413,6 +415,8 @@ export function createPlatform(scene) {
     shelfNeonMat,
     shelfBulbs,
     zoneLeds,
+    zoneLaneStrips,
+    zoneBadges,
   };
 
   // === CABINET SIDE PANELS (thick, styled like real arcade machine sides) ===
@@ -480,9 +484,9 @@ export function createPlatform(scene) {
   // tension when deciding where to aim the coin drop.
   const numSegments = 3;
   const zoneLayout = [
-    { type: 'hole', width: 1.0 },   // left gutter (narrow — only edge coins)
-    { type: 'win',  width: 4.4 },   // center win (wide — most coins land here)
-    { type: 'hole', width: 1.0 },   // right gutter (narrow)
+    { type: 'hole', width: 0.85 },  // left gutter (clear risk lane)
+    { type: 'win',  width: 4.70 },  // center win (wide, readable target)
+    { type: 'hole', width: 0.85 },  // right gutter (clear risk lane)
   ];
 
   const zones = [];
@@ -567,25 +571,85 @@ export function createPlatform(scene) {
   trayRim.position.set(0, chuteY1 + 0.55, chuteEndZ + 0.50);
   group.add(trayRim);
 
-  // Zone LEDs on the drop edge: green WIN centre, red HOLE gutters
+  // The final ramp constants are declared here because the zone lanes are
+  // built before the slope mesh itself. Keeping one source of truth prevents
+  // the visual lanes and physics ramp from drifting apart.
+  const SLOPE_START_Z = SHELF_NEUTRAL_Z + SHELF_DEPTH / 2 + 0.2;
+  const SLOPE_END_Z = D / 2 - 1.45;
+  const SLOPE_DROP = 0.18;
+  const slopeLen = SLOPE_END_Z - SLOPE_START_Z;
+
+  // Zone presentation: the old machine only had three tiny edge LEDs, so the
+  // gameplay result was hard to read. Paint the entire final ramp with clear
+  // color-coded lanes, add physical separators, and put a readable badge on
+  // each landing zone. The gameplay mapping remains the same three zones.
   const zoneLedMat = {
     win: new THREE.MeshStandardMaterial({ color: 0x00ff88, emissive: 0x00ff44, emissiveIntensity: 2.6 }),
     hole: new THREE.MeshStandardMaterial({ color: 0xff2244, emissive: 0xff0022, emissiveIntensity: 2.6 }),
   };
+  const laneMat = {
+    win: new THREE.MeshStandardMaterial({ color: 0x00d98a, emissive: 0x00aa66, emissiveIntensity: 0.8, transparent: true, opacity: 0.42, roughness: 0.55 }),
+    hole: new THREE.MeshStandardMaterial({ color: 0xd51f61, emissive: 0x990033, emissiveIntensity: 0.8, transparent: true, opacity: 0.38, roughness: 0.55 }),
+  };
+  const laneLength = Math.max(0.4, slopeLen - 0.06);
+
+  function makeZoneBadge(text, color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.88;
+    ctx.roundRect(4, 4, 248, 56, 14);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#13051f';
+    ctx.font = '900 28px Orbitron, Arial, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 33);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.Mesh(new THREE.PlaneGeometry(0.72, 0.18), new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, toneMapped: false, depthTest: false, depthWrite: false }));
+  }
+
   zones.forEach(zone => {
     const led = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.05, 0.03, 0.03), zoneLedMat[zone.type]);
     led.position.set(zone.centerX, chuteY0 + 0.05, chuteStartZ - 0.03);
     group.add(led);
     zoneLeds.push({ mesh: led, type: zone.type, phase: zone.centerX * 0.7 });
+
+    const lane = new THREE.Mesh(new THREE.BoxGeometry(zone.width - 0.08, 0.014, laneLength), laneMat[zone.type]);
+    lane.position.set(zone.centerX, surfaceY - SLOPE_DROP / 2 + 0.018, SLOPE_START_Z + slopeLen / 2);
+    lane.rotation.x = Math.atan2(SLOPE_DROP, slopeLen);
+    lane.renderOrder = 2;
+    group.add(lane);
+    zoneLaneStrips.push({ mesh: lane, type: zone.type, phase: zone.centerX * 0.6 });
+
+    const badge = makeZoneBadge(zone.type === 'win' ? 'WIN' : 'RISK', zone.type === 'win' ? '#00e08b' : '#e32b68');
+    // Keep labels just in front of the glass edge and depth-independent so
+    // the WIN/RISK callouts remain readable through the cabinet.
+    badge.position.set(zone.centerX, chuteY0 + 0.10, chuteStartZ + 0.015);
+    badge.rotation.x = 0;
+    badge.renderOrder = 6;
+    group.add(badge);
+    zoneBadges.push({ mesh: badge, type: zone.type, phase: zone.centerX * 0.6 });
   });
+
+  // Slim metallic dividers make the boundaries physically legible even when
+  // the ramp is crowded with coins.
+  const dividerMat = new THREE.MeshStandardMaterial({ color: 0xffd86a, emissive: 0xff8a22, emissiveIntensity: 1.3, metalness: 0.88, roughness: 0.2 });
+  for (let i = 1; i < zones.length; i++) {
+    const divider = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.08, laneLength), dividerMat);
+    divider.position.set(zones[i].startX, surfaceY - SLOPE_DROP / 2 + 0.05, SLOPE_START_Z + slopeLen / 2);
+    divider.rotation.x = Math.atan2(SLOPE_DROP, slopeLen);
+    group.add(divider);
+  }
 
   // === SLOPE: coins slide downhill from shelf front to win/holes ===
   // Slope now runs all the way to the drop edge (was ending 0.4u short,
   // leaving an invisible up-hill lip that coins had to climb).
-  const SLOPE_START_Z = SHELF_NEUTRAL_Z + SHELF_DEPTH / 2 + 0.2;
-  const SLOPE_END_Z = D / 2 - 1.45;
-  const SLOPE_DROP = 0.18;
-  const slopeLen = SLOPE_END_Z - SLOPE_START_Z;
   const slopeMat = new THREE.MeshStandardMaterial({ color: 0x3a1a55, roughness: 0.6, metalness: 0.3, emissive: 0x1a0a30, emissiveIntensity: 0.2 });
   const slopeMesh = new THREE.Mesh(new THREE.BoxGeometry(W - 0.5, 0.02, slopeLen), slopeMat);
   slopeMesh.position.set(0, surfaceY - SLOPE_DROP / 2, SLOPE_START_Z + slopeLen / 2);
@@ -700,6 +764,24 @@ export function createPlatform(scene) {
           led.mesh.material.emissiveIntensity = led.type === 'win'
             ? 2.1 + pulseLed * 1.5
             : 1.7 + pulseLed * 1.1;
+        }
+      }
+      if (wallAnims.zoneLaneStrips) {
+        for (const lane of wallAnims.zoneLaneStrips) {
+          const pulseLane = 0.5 + 0.5 * Math.sin(time * 2.1 + lane.phase);
+          lane.mesh.material.opacity = lane.type === 'win'
+            ? 0.28 + pulseLane * 0.22
+            : 0.24 + pulseLane * 0.18;
+          lane.mesh.material.emissiveIntensity = lane.type === 'win'
+            ? 0.65 + pulseLane * 0.55
+            : 0.55 + pulseLane * 0.35;
+        }
+      }
+      if (wallAnims.zoneBadges) {
+        for (const badge of wallAnims.zoneBadges) {
+          const breathe = 1 + Math.sin(time * 1.8 + badge.phase) * 0.035;
+          badge.mesh.scale.set(breathe, breathe, 1);
+          badge.mesh.material.opacity = 0.78 + (breathe - 0.965) * 2.0;
         }
       }
     }

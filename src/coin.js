@@ -391,14 +391,17 @@ export function createObjectSystem(scene, platform, existingCardCount = 0, onImp
     for (let i = 0; i < objects.length; i++) {
       const o = objects[i];
       objectIndices.set(o, i);
-      if (o.state === 'dropping' || o.state === 'falling') continue;
+      // Falling coins must enter the spatial grid so they can produce a
+      // restrained impact when they land on another coin. Dropping coins and
+      // floating cards use separate movement paths, not pair physics.
+      if (o.state === 'dropping' || o.state === 'floating') continue;
       gridInsert(o);
     }
 
     const checked = new Set();
     for (let i = 0; i < objects.length; i++) {
       const a = objects[i];
-      if (a.state === 'dropping' || a.state === 'falling') continue;
+      if (a.state === 'dropping') continue;
       if (a.state === 'floating') continue;
 
       const neighbors = gridNeighbors(a);
@@ -417,23 +420,89 @@ export function createObjectSystem(scene, platform, existingCardCount = 0, onImp
 
         const dx = b.x - a.x, dz = b.z - a.z;
         const distXZ = Math.sqrt(dx * dx + dz * dz);
+        const centerDeltaY = Math.abs(b.y - a.y);
+        const bodyOverlapY = halfH(a.type) + halfH(b.type) - centerDeltaY;
+        const aFalling = a.state === 'falling';
+        const bFalling = b.state === 'falling';
 
-        if (distXZ < minDist && distXZ > 0.001) {
+        // Coins that are exactly stacked touch at their faces but do not
+        // overlap vertically. The old generous tolerance treated those
+        // stacks as side-by-side collisions and kicked the lower coin away.
+        // True vertical stacks touch at their faces but do not overlap in Y.
+        // Same-layer coins at the exact same height are different: give them a
+        // tiny deterministic skid apart so initialization/contact overlap does
+        // not remain visually interpenetrated.
+        if (!aFalling && !bFalling && bodyOverlapY <= 0.004) {
+          if (centerDeltaY <= 0.004 && distXZ < minDist) {
+            const nudge = Math.min((minDist - distXZ) * 0.18, 0.035);
+            const nx = distXZ > 0.001 ? dx / distXZ : 1;
+            const nz = distXZ > 0.001 ? dz / distXZ : 0;
+            a.x -= nx * nudge; a.z -= nz * nudge;
+            b.x += nx * nudge; b.z += nz * nudge;
+          }
+          continue;
+        }
+        if (distXZ < minDist) {
           const overlap = minDist - distXZ;
-          const nx = dx / distXZ, nz = dz / distXZ;
-
-          if (a.state === 'falling' && b.state === 'sliding') {
-            b.vz += overlap * 0.3;
-            b.vx += (Math.random() - 0.5) * overlap * 0.15;
-            a.vx -= nx * overlap * 0.15;
-            a.vz -= nz * overlap * 0.15;
-          } else if (b.state === 'falling' && a.state === 'sliding') {
-            a.vz += overlap * 0.3;
-            a.vx += (Math.random() - 0.5) * overlap * 0.15;
-            b.vx -= nx * overlap * 0.15;
-            b.vz -= nz * overlap * 0.15;
+          // A coin dropped directly over another can have zero horizontal
+          // separation. Avoid NaN normals and let the vertical landing branch
+          // stack it cleanly instead of skipping the collision entirely.
+          let nx = 1, nz = 0;
+          if (distXZ > 0.001) {
+            nx = dx / distXZ;
+            nz = dz / distXZ;
           } else {
-            const push = overlap * 0.3;
+            const rvx = b.vx - a.vx;
+            const rvz = b.vz - a.vz;
+            const rvLen = Math.sqrt(rvx * rvx + rvz * rvz);
+            if (rvLen > 0.001) {
+              nx = rvx / rvLen;
+              nz = rvz / rvLen;
+            }
+          }
+
+          if (aFalling !== bFalling) {
+            const falling = aFalling ? a : b;
+            const support = aFalling ? b : a;
+            const fallingHalf = halfH(falling.type);
+            const supportTop = support.y + halfH(support.type);
+            const fallingBottom = falling.y - fallingHalf;
+            const landingGap = fallingBottom - supportTop;
+            const descending = falling.vy < 0;
+            const crossedSupport = (falling._prevY || falling.y) - fallingHalf > supportTop
+              && fallingBottom <= supportTop + 0.045;
+
+            // A drop arriving from above should become a supported coin, not
+            // an impulse cannon. Also catch a fast substep that moved a few
+            // millimetres through the support before collision resolution.
+            // Put it on the pile, inherit most of the support's motion, and
+            // let the normal shelf/pusher physics move the stack afterward.
+            if (descending && (crossedSupport || (landingGap > -0.05 && landingGap < 0.045))) {
+              falling.y = supportTop + fallingHalf;
+              falling.vy = 0;
+              falling.state = 'sliding';
+              falling.onShelf = !!support.onShelf;
+              falling.vx = support.vx * 0.7 + falling.vx * 0.2;
+              falling.vz = support.vz * 0.7 + falling.vz * 0.2;
+              // It is now a settled pile coin, not a fresh drop. Prevent the
+              // drop grace timer from immediately engaging the slot logic.
+              falling._dropTime = 0;
+              falling._slotTimer = 0;
+              continue;
+            }
+
+            // Side contacts during a descent still nudge the pile, but use a
+            // small bounded push and never add random velocity. This prevents
+            // a coin landing near another coin from popping it outward.
+            if (bodyOverlapY > 0) {
+              const sidePush = Math.min(overlap * 0.12, 0.025);
+              support.x += nx * sidePush * (aFalling ? 1 : -1);
+              support.z += nz * sidePush * (aFalling ? 1 : -1);
+              falling.vx *= 0.85;
+              falling.vz *= 0.85;
+            }
+          } else {
+            const push = Math.min(overlap * 0.3, 0.06);
             a.x -= nx * push; a.z -= nz * push;
             b.x += nx * push; b.z += nz * push;
             const relV = (b.vx - a.vx) * nx + (b.vz - a.vz) * nz;
@@ -443,7 +512,9 @@ export function createObjectSystem(scene, platform, existingCardCount = 0, onImp
                 lastImpactAt = now;
                 onImpact(a.x + nx * aR, a.y, a.z + nz * aR, Math.min(1, Math.abs(relV)));
               }
-              const impulse = relV * BOUNCE * 0.5;
+              // Coins on the same layer should skid apart, not bounce like
+              // billiard balls. Keep only a soft fraction of the impulse.
+              const impulse = relV * BOUNCE * 0.14;
               a.vx += impulse * nx; a.vz += impulse * nz;
               b.vx -= impulse * nx; b.vz -= impulse * nz;
             }
@@ -647,6 +718,7 @@ export function createObjectSystem(scene, platform, existingCardCount = 0, onImp
         if (o.type === 'card' || o.state === 'floating') continue;
 
         if (o.state === 'falling') {
+          o._prevY = o.y;
           o.vy -= GRAVITY * subDt;
           o.y += o.vy * subDt;
           o.x += o.vx * subDt;

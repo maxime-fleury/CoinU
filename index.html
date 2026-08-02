@@ -180,6 +180,29 @@
   <!-- Canvas -->
   <div id="canvas-container"></div>
 
-  <script type="module" src="dist/main.js"></script>
+  <script>
+    // ES modules cannot be loaded from file:// in modern browsers. Show a
+    // useful local-development message instead of an opaque CORS/security
+    // error; the game loads normally over GitHub Pages or the Bun dev server.
+    if (window.location.protocol === 'file:') {
+      const notice = document.createElement('div');
+      notice.setAttribute('role', 'alert');
+      notice.style.cssText = [
+        'position:fixed', 'inset:0', 'z-index:999', 'display:grid',
+        'place-items:center', 'padding:24px', 'background:#0a0012',
+        'color:#f0e0ff', 'font:600 18px/1.5 Rajdhani, sans-serif',
+        'text-align:center'
+      ].join(';');
+      notice.innerHTML = '<div><h1 style="color:#ffd700;font-family:Orbitron,sans-serif">Arcana Coin Cathedral</h1>'
+        + '<p>Open this game through a web server instead of double-clicking index.html.</p>'
+        + '<p style="color:#39f7ff;font-family:monospace;font-size:14px">bun run dev → http://localhost:3001</p></div>';
+      document.body.appendChild(notice);
+    } else {
+      const gameScript = document.createElement('script');
+      gameScript.type = 'module';
+      gameScript.src = './dist/main.js';
+      document.body.appendChild(gameScript);
+    }
+  </script>
 </body>
 </html>

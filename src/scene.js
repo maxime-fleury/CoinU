@@ -24,7 +24,12 @@ export function createScene(container) {
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  // Firefox/WebGL can warn when PCF samples a depth-comparison texture with
+  // LINEAR filtering. Basic shadows use ordinary depth sampling on that
+  // browser, avoiding the driver warning while keeping shadows functional;
+  // other browsers retain the softer PCF look.
+  const isFirefox = typeof navigator !== 'undefined' && /Firefox/i.test(navigator.userAgent);
+  renderer.shadowMap.type = isFirefox ? THREE.BasicShadowMap : THREE.PCFShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.6;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -73,37 +78,47 @@ export function createScene(container) {
         vec3 dir = normalize(vWorldPosition);
         float h = dir.y;
 
-        // Vertical gradient (deep purple up top, near-black at the bottom).
-        float t = pow(max(h, 0.0), 0.6);
-        vec3 col = mix(bottomColor, topColor, t);
+        // Layered twilight gradient: deep indigo overhead, violet at the
+        // horizon, and a cool blue floor fade so the room feels dimensional.
+        float up = smoothstep(-0.15, 0.92, h);
+        vec3 col = mix(bottomColor, topColor, pow(up, 0.62));
+        float horizon = exp(-abs(h + 0.015) * 18.0);
+        col += vec3(0.36, 0.08, 0.58) * horizon;
+        col += vec3(0.04, 0.22, 0.48) * exp(-abs(h - 0.12) * 9.0);
 
-        // Neon horizon band — magenta glow hugging the floor line.
-        float band = exp(-abs(h) * 12.0) * 0.35 + exp(-abs(h - 0.03) * 40.0) * 0.18;
-        col += vec3(0.55, 0.22, 0.75) * band;
+        // Slow nebula ribbons add color without competing with the machine.
+        float cloudA = sin(dir.x * 5.0 + dir.z * 3.0 + time * 0.025);
+        float cloudB = sin(dir.z * 8.0 - dir.x * 2.0 - time * 0.018);
+        float cloud = smoothstep(0.22, 0.92, cloudA * 0.55 + cloudB * 0.45) * (0.35 + 0.65 * up);
+        col += vec3(0.25, 0.03, 0.36) * cloud * 0.22;
+        col += vec3(0.02, 0.16, 0.36) * smoothstep(0.35, 0.95, -cloudA) * up * 0.12;
 
-        // Star field (upper hemisphere only, hash-based so it's stable and
-        // cheap — no texture needed). Each star twinkles on its own phase.
-        if (h > 0.03) {
-          vec2 uv = vec2(atan(dir.z, dir.x), asin(dir.y)) * 26.0;
+        // Star field (upper hemisphere only, hash-based so it stays cheap).
+        if (h > 0.02) {
+          vec2 uv = vec2(atan(dir.z, dir.x), asin(dir.y)) * 32.0;
           vec2 id = floor(uv);
           float rnd = hash21(id);
           float rnd2 = hash21(id + vec2(17.0, 7.0));
-          if (rnd > 0.82) {
+          if (rnd > 0.78) {
             vec2 f = fract(uv) - 0.5;
             float d = length(f);
-            float tw = 0.55 + 0.45 * sin(time * (1.0 + rnd2 * 3.0) + rnd2 * 40.0);
-            float star = smoothstep(0.20, 0.02, d) * tw * (0.35 + 0.75 * rnd2);
-            col += vec3(1.0, 0.95, 0.88) * star;
+            float tw = 0.52 + 0.48 * sin(time * (0.8 + rnd2 * 2.8) + rnd2 * 40.0);
+            float star = smoothstep(0.19, 0.018, d) * tw * (0.35 + 0.8 * rnd2);
+            vec3 starColor = mix(vec3(0.55, 0.82, 1.0), vec3(1.0, 0.72, 0.92), rnd2);
+            col += starColor * star;
+            // A few larger stars get a tiny four-point sparkle.
+            if (rnd2 > 0.82) col += starColor * smoothstep(0.22, 0.0, abs(f.x) + abs(f.y)) * 0.22;
           }
         }
 
-        // Moon with a soft halo, upper-left of the back wall.
+        // Moon with a broad lavender halo and a subtle cyan rim.
         vec3 moonDir = normalize(vec3(0.45, 0.52, -0.73));
         float md = dot(dir, moonDir);
-        float disc = smoothstep(0.9955, 0.9980, md);
-        float glow = exp((md - 1.0) * 70.0);
-        col += moonColor * disc * 1.5;
-        col += vec3(0.85, 0.78, 0.95) * glow * 0.30;
+        float disc = smoothstep(0.9948, 0.9983, md);
+        float glow = exp((md - 1.0) * 58.0);
+        col += moonColor * disc * 1.75;
+        col += vec3(0.58, 0.38, 0.95) * glow * 0.36;
+        col += vec3(0.08, 0.42, 0.9) * pow(max(0.0, 1.0 - md), 18.0) * 0.012;
 
         gl_FragColor = vec4(col, 1.0);
       }
@@ -166,32 +181,63 @@ export function createScene(container) {
   scene.add(eventGlow);
   const eventPulse = { strength: 0, color: new THREE.Color(0xff4fd8) };
 
-  // === GOILDEN PILLARS WITH TORCH FLAMES ===
+  // === JEWELED PILLARS WITH TORCH FLAMES ===
   const flameData = [];
+  const pillarAccents = [];
   const pillarPositions = [[-6, 4], [6, 4], [-6, -2], [6, -2], [-6, -5], [6, -5]];
 
-  pillarPositions.forEach(([px, pz]) => {
+  pillarPositions.forEach(([px, pz], idx) => {
     // Pillar body (golden casino style)
     const pillarMat = new THREE.MeshStandardMaterial({
-      color: 0x886633, roughness: 0.25, metalness: 0.85,
-      emissive: 0x553300, emissiveIntensity: 0.1,
+      color: 0x241242, roughness: 0.22, metalness: 0.88,
+      emissive: 0x210a4e, emissiveIntensity: 0.35,
     });
-    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.35, 3.5, 8), pillarMat);
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.42, 3.5, 12), pillarMat);
     pillar.position.set(px, 1.75, pz); pillar.castShadow = true;
     scene.add(pillar);
 
     // Capital (golden ornate top)
     const capMat = new THREE.MeshStandardMaterial({
-      color: 0xddaa33, roughness: 0.15, metalness: 0.9,
-      emissive: 0xaa7700, emissiveIntensity: 0.3,
+      color: 0xffc94d, roughness: 0.13, metalness: 0.94,
+      emissive: 0xc45b16, emissiveIntensity: 0.72,
     });
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.35, 0.25, 8), capMat);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.38, 0.24, 12), capMat);
     cap.position.set(px, 3.6, pz);
     scene.add(cap);
     // Base
-    const baseCap = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.42, 0.15, 8), capMat);
+    const baseCap = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.54, 0.18, 12), capMat);
     baseCap.position.set(px, 0.05, pz);
     scene.add(baseCap);
+
+    // Jewel bands and a faceted crystal turn the old brown posts into
+    // recognizable magical-arcade landmarks without adding textures.
+    const bandMats = [
+      new THREE.MeshStandardMaterial({ color: 0x39f7ff, emissive: 0x00b9e8, emissiveIntensity: 1.8, metalness: 0.7, roughness: 0.18 }),
+      new THREE.MeshStandardMaterial({ color: 0xff4fd8, emissive: 0xd71996, emissiveIntensity: 1.6, metalness: 0.7, roughness: 0.18 }),
+    ];
+    const bands = [];
+    [-1.05, 0.0, 1.05].forEach((offset, bandIndex) => {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.315, 0.035, 8, 20), bandMats[bandIndex % 2]);
+      band.position.set(px, 1.75 + offset, pz);
+      band.rotation.x = Math.PI / 2;
+      scene.add(band);
+      bands.push(band);
+    });
+    const crystalMat = new THREE.MeshStandardMaterial({
+      color: idx % 2 ? 0x39f7ff : 0xff4fd8,
+      emissive: idx % 2 ? 0x00b9e8 : 0xd71996,
+      emissiveIntensity: 2.8, roughness: 0.12, metalness: 0.45,
+      transparent: true, opacity: 0.92,
+    });
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.20, 1), crystalMat);
+    crystal.position.set(px, 3.88, pz);
+    crystal.rotation.set(0.2, idx * 0.7, 0.15);
+    scene.add(crystal);
+    const crystalHalo = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.018, 8, 24), bandMats[idx % 2]);
+    crystalHalo.position.set(px, 3.88, pz);
+    crystalHalo.rotation.x = Math.PI / 2;
+    scene.add(crystalHalo);
+    pillarAccents.push({ pillar, cap, bands, crystal, crystalHalo, phase: idx * 0.8 });
 
     // === FLAME on top (torch style) ===
     // Torch holder
@@ -202,7 +248,7 @@ export function createScene(container) {
 
     // Outer flame (orange glow)
     const flameMat = new THREE.MeshStandardMaterial({
-      color: 0xff6600, emissive: 0xff4400, emissiveIntensity: 2.5,
+      color: 0xff6b35, emissive: 0xff246f, emissiveIntensity: 2.2,
       transparent: true, opacity: 0.7,
     });
     const flame = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.5, 6), flameMat.clone());
@@ -211,7 +257,7 @@ export function createScene(container) {
 
     // Inner flame (bright yellow-white)
     const innerFlameMat = new THREE.MeshStandardMaterial({
-      color: 0xffee44, emissive: 0xffff88, emissiveIntensity: 4.0,
+      color: 0xffd6ff, emissive: 0xff8ce8, emissiveIntensity: 3.6,
       transparent: true, opacity: 0.85,
     });
     const innerFlame = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.3, 6), innerFlameMat.clone());
@@ -225,7 +271,7 @@ export function createScene(container) {
     scene.add(core);
 
     // Point light for flame (warm, bright)
-    const flameLight = new THREE.PointLight(0xff6600, 1.0, 5);
+    const flameLight = new THREE.PointLight(idx % 2 ? 0x39f7ff : 0xff4fd8, 0.9, 5);
     flameLight.position.set(px, 4.2, pz);
     scene.add(flameLight);
 
@@ -238,6 +284,11 @@ export function createScene(container) {
       baseY: 4.15,
       phase: Math.random() * Math.PI * 2,
       pos: { x: px, z: pz },
+      pillar,
+      cap,
+      bands,
+      crystal,
+      crystalHalo,
     });
   });
 
@@ -330,9 +381,9 @@ export function createScene(container) {
       }
     }
 
-    // Gold grout lines
-    ctx.strokeStyle = 'rgba(255, 215, 0, 0.12)';
-    ctx.lineWidth = 2;
+    // Fine champagne grout keeps the floor luxurious rather than noisy.
+    ctx.strokeStyle = 'rgba(190, 148, 255, 0.16)';
+    ctx.lineWidth = 1.5;
     for (let i = 0; i <= tiles; i++) {
       ctx.beginPath();
       ctx.moveTo(i * tileSize, 0);
@@ -351,6 +402,7 @@ export function createScene(container) {
     }
 
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(4, 4);
@@ -363,25 +415,17 @@ export function createScene(container) {
     new THREE.MeshStandardMaterial({
       map: floorTexture,
       color: 0xffffff,
-      roughness: 0.35,
-      metalness: 0.45,
-      emissive: 0x110822,
-      emissiveIntensity: 0.15,
+      roughness: 0.18,
+      metalness: 0.72,
+      emissive: 0x120b34,
+      emissiveIntensity: 0.28,
     })
   );
   ground.rotation.x = -Math.PI / 2; ground.position.y = -0.1; ground.receiveShadow = true;
-  scene.add(ground);
+  scene.add(ground);    // The texture already contains subtle tile seams. Avoid a second full
+    // world grid here: it made the floor read like a debug plane and added
+    // 42 extra draw calls around the machine.
 
-  // Ground grid lines for casino floor feel
-  const gridMat = new THREE.MeshBasicMaterial({ color: 0xcc88ff, transparent: true, opacity: 0.08 });
-  for (let i = -10; i <= 10; i++) {
-    const lineH = new THREE.Mesh(new THREE.BoxGeometry(40, 0.003, 0.015), gridMat);
-    lineH.position.set(0, -0.09, i * 2);
-    scene.add(lineH);
-    const lineV = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.003, 40), gridMat);
-    lineV.position.set(i * 2, -0.09, 0);
-    scene.add(lineV);
-  }
 
   // === CASINO FLOOR CIRCLE (under machine) ===
   const floorCircle = new THREE.Mesh(
@@ -390,6 +434,31 @@ export function createScene(container) {
   );
   floorCircle.rotation.x = -Math.PI / 2; floorCircle.position.set(0, -0.08, 0);
   scene.add(floorCircle);
+
+  // Concentric holographic floor rings and radial accents frame the machine
+  // like a premium arcade plinth instead of leaving it on a flat grid.
+  const floorAccents = [];
+  const floorAccentColors = [0x39f7ff, 0xff4fd8, 0xffd84d, 0x7b61ff];
+  [4.25, 5.4, 7.0, 9.0].forEach((radius, ringIndex) => {
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: floorAccentColors[ringIndex], transparent: true,
+      opacity: ringIndex === 0 ? 0.22 : 0.11, blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(radius, radius + 0.018, 96), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(0, -0.065 + ringIndex * 0.002, 0);
+    scene.add(ring);
+    floorAccents.push({ mesh: ring, phase: ringIndex * 0.8, speed: ringIndex % 2 ? -0.025 : 0.018 });
+  });
+  const radialMat = new THREE.MeshBasicMaterial({ color: 0x39f7ff, transparent: true, opacity: 0.06, blending: THREE.AdditiveBlending });
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2;
+    const ray = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.003, 9.0), radialMat);
+    ray.position.set(Math.sin(angle) * 4.5, -0.062, Math.cos(angle) * 4.5);
+    ray.rotation.y = angle;
+    scene.add(ray);
+  }
 
   // === NEON LEDS around machine (casino colors) ===
   [[-4.5, 1.2, -3, 0xffd700], [4.5, 1.2, -3, 0xffd700],
@@ -442,6 +511,7 @@ export function createScene(container) {
   return {
     scene, camera, renderer, controls,
     flameData,
+    pillarAccents,
     lanterns,
     smokeData,
     pulseEvent(type = 'win') {
@@ -455,6 +525,20 @@ export function createScene(container) {
       eventPulse.strength = type === 'jackpot' ? 2.4 : (type === 'bigwin' ? 1.35 : 0.75);
     },
     updateAmbient(time, dt = 1 / 60) {
+      // Skybox time uniform drives nebula motion and star twinkle.
+      for (const accent of floorAccents) {
+        accent.mesh.rotation.z += accent.speed * dt;
+        accent.mesh.material.opacity = 0.075 + 0.055 * (0.5 + 0.5 * Math.sin(time * 0.8 + accent.phase));
+      }
+      for (const accent of pillarAccents) {
+        const pulse = 0.5 + 0.5 * Math.sin(time * 1.4 + accent.phase);
+        accent.crystal.rotation.y += dt * (0.45 + pulse * 0.25);
+        accent.crystal.rotation.x = 0.2 + Math.sin(time * 0.7 + accent.phase) * 0.12;
+        accent.crystal.scale.setScalar(0.92 + pulse * 0.16);
+        accent.crystalHalo.rotation.z += dt * 0.8;
+        accent.cap.material.emissiveIntensity = 0.5 + pulse * 0.45;
+        for (const band of accent.bands) band.material.emissiveIntensity = 1.0 + pulse * 1.2;
+      }
       // Skybox time uniform drives star twinkle + any future sky animation.
       skyMat.uniforms.time.value = time;
       // Star-field twinkle: oscillate the master material opacity for the
