@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coin Pusher 3D - Casino</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/style.css" />
+  <style>
+    .hidden { display: none !important; }
+    #free-coins-modal.hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- UI Overlay -->
+  <div id="ui-overlay">
+
+    <!-- HUD -->
+    <div id="hud">
+      <div class="hud-item">
+        <span class="currency-icon">&#x1FA99;</span>
+        <div class="counter-text">
+          <span id="coins-display">10</span>
+          <span class="label" data-key="coins">coins</span>
+        </div>
+      </div>
+      <div class="hud-item">
+        <span class="currency-icon">&#x1F4B5;</span>
+        <div class="counter-text">
+          <span id="dollars-display">0</span>
+          <span class="label" data-key="dollars">dollars</span>
+        </div>
+      </div>
+      <div class="hud-item">
+        <span class="sub-label total-label">&#x1F4B0; <span id="total-earned">0</span> <span data-key="total">total</span></span>
+      </div>
+      <div id="prestige-badge" class="hud-item hidden">
+        <span>&#x1F451;</span>
+        <span id="prestige-points-display">0</span>
+        <span class="label" data-key="prestige">prestige</span>
+      </div>
+      <div id="regen-timer" class="hud-item hidden">
+        <span class="sub-label">&#x23F1; <span id="regen-countdown">0</span>s</span>
+      </div>
+    </div>
+
+    <!-- Language Toggle -->
+    <div id="lang-toggle-area">
+      <button id="lang-btn" class="lang-btn">FR</button>
+    </div>
+
+    <!-- Currency Toggle -->
+    <div id="currency-toggle-area">
+      <button class="currency-btn active" data-currency="coins">&#x1FA99; Coins</button>
+      <button class="currency-btn" data-currency="dollars">&#x1F4B5; Dollars</button>
+    </div>
+
+    <!-- Drop Button -->
+    <div id="drop-area">
+      <button id="drop-btn" class="glow-button">
+        <span class="btn-icon">&#x1FA99;</span>
+        <span class="btn-text">DROP COIN</span>
+        <span class="btn-sub">SPACE to drop</span>
+      </button>
+      <div id="drop-effect-label"></div>
+    </div>
+
+    <!-- Tabs -->
+    <div id="tabs">
+      <button class="tab-btn active" data-tab="shop">&#x1F6D2; Shop</button>
+      <button class="tab-btn" data-tab="prestige">&#x1F451; Prestige</button>
+      <button class="tab-btn" data-tab="settings">&#x2699; Help</button>
+    </div>
+
+    <!-- Panel -->
+    <div id="panel-container">
+      <div class="panel-header">
+        <span id="panel-title">&#x1F6D2; Upgrades</span>
+        <span id="panel-toggle" class="toggle-btn">&#x25BC;</span>
+      </div>
+      <div id="panel-content">
+        <div id="shop-view">
+          <div id="upgrades-list"></div>
+        </div>
+        <div id="prestige-view" class="hidden">
+          <div class="prestige-header">
+            <div class="prestige-points-display" id="prestige-points-big">0</div>
+            <div class="prestige-sub">&#x2B50; Prestige Points</div>
+            <div id="prestige-progress-wrap" class="prestige-progress-wrap">
+              <div class="prestige-progress-bar" id="prestige-progress-bar"></div>
+              <span class="prestige-progress-text" id="prestige-progress-text">0 / 100</span>
+            </div>
+            <button id="prestige-btn" class="prestige-btn">&#x1F525; SACRIFICE PROGRESS</button>
+            <div class="prestige-sub-desc" style="margin-top:6px;font-size:11px;">
+              Lose everything but gain permanent prestige points
+            </div>
+          </div>
+          <div id="collected-cards" class="collected-cards hidden">
+            <div class="cards-title">&#x1F0CF; Collection</div>
+            <div class="cards-grid" id="cards-grid"></div>
+          </div>
+          <div id="prestige-upgrades-list"></div>
+        </div>
+        <div id="settings-view" class="hidden">
+          <div class="settings-header">
+            <div class="settings-title">&#x2699; Help & Settings</div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-label">Controls</div>
+            <ul class="controls-list">
+              <li><span class="key">SPACE</span> Drop coin/bill</li>
+              <li><span class="key">1-9, 0</span> Buy upgrades</li>
+              <li><span class="key">Mouse</span> Rotate camera</li>
+              <li><span class="key">Scroll</span> Zoom camera</li>
+            </ul>
+          </div>
+          <div class="settings-section">
+            <div class="settings-label">Auto-Drop</div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="auto-drop-toggle">
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">Enable auto-drop</span>
+            </label>
+          </div>
+          <div class="settings-section">
+            <div class="settings-label">Sound</div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="sound-toggle" checked>
+              <span class="toggle-slider"></span>
+              <span class="toggle-label">Enable sound</span>
+            </label>
+          </div>
+        </div>
+        <div class="panel-footer">
+          <button id="reset-btn" class="reset-btn">&#x1F5D1; Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Free coins modal -->
+    <div id="free-coins-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>&#x1F480; Out of Funds!</h2>
+        <p>The spirits of the casino offer you a second chance...</p>
+        <button id="free-coins-btn" class="glow-button pulse">
+          <span>&#x1F381; CLAIM BONUS</span>
+        </button>
+        <p class="modal-timer">Next donation in <span id="free-cooldown">30</span>s</p>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div id="notifications"></div>
+
+    <!-- First-time tutorial overlay (dismissed by SPACE / drop-click / direct tap) -->
+    <div id="tutorial-overlay" class="tutorial-overlay hidden">
+      <div class="tutorial-card">
+        <div class="tutorial-title">&#x1F0CF; COIN PUSHER</div>
+        <ul class="tutorial-list">
+          <li><span class="key">SPACE</span> Drop a coin</li>              <li><span class="key">1-9, 0</span> Buy upgrades (12 total)</li>
+          <li><span class="key">TAB</span> Prestige (when eligible)</li>
+          <li><span class="key">&#x21E7; + click</span> Bulk-buy upgrade</li>
+          <li><span class="key">FR / EN</span> Switch language</li>
+        </ul>
+        <div class="tutorial-foot">Click anywhere to start &#x25B6;</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Canvas -->
+  <div id="canvas-container"></div>
+
+  <script type="module" src="dist/main.js"></script>
+</body>
+</html>
